@@ -114,7 +114,7 @@ class MainActivity : ComponentActivity() {
             onDismissRequest = { addDialog = false },
             containerColor = Panel,
             shape = RoundedCornerShape(28.dp),
-            title = { Text("NEUE AUFGABE", fontFamily = ndot, fontSize = 24.sp) },
+            title = { DisplayTitle("NEUE AUFGABE", ndot, fontSize = 24.sp) },
             text = { OutlinedTextField(newName, { newName = it.take(60) }, label = { Text("Bezeichnung") }, singleLine = true) },
             confirmButton = { TextButton(enabled = newName.isNotBlank(), onClick = {
                 rules = rules + Rule(UUID.randomUUID().toString(), newName.trim(), (1..7).toSet())
@@ -125,26 +125,33 @@ class MainActivity : ComponentActivity() {
     }
 }
 
-@Composable private fun Screen(ndot: FontFamily, eyebrow: String, title: String, subtitle: String, content: @Composable ColumnScope.() -> Unit) {
-    Column(Modifier.fillMaxSize().verticalScroll(rememberScrollState()).padding(horizontal = 22.dp).padding(top = 26.dp, bottom = 120.dp)) {
+@Composable private fun DisplayTitle(text: String, ndot: FontFamily, modifier: Modifier = Modifier, fontSize: androidx.compose.ui.unit.TextUnit = 38.sp) {
+    // The current uploaded font file renders empty glyphs on-device. Keep titles visible and mark the exact switch point.
+    // After a verified NDOT47 TTF is uploaded, replace FontFamily.Monospace below with ndot.
+    Text(text, modifier = modifier, fontFamily = FontFamily.Monospace, fontWeight = FontWeight.Bold, fontSize = fontSize, lineHeight = fontSize * 1.05f, letterSpacing = 2.sp)
+}
+
+@Composable private fun Screen(ndot: FontFamily, eyebrow: String, title: String, subtitle: String, scrollable: Boolean = true, content: @Composable ColumnScope.() -> Unit) {
+    val base = Modifier.fillMaxSize().padding(horizontal = 22.dp).padding(top = 20.dp, bottom = 102.dp)
+    Column(if (scrollable) base.verticalScroll(rememberScrollState()) else base) {
         Row(verticalAlignment = Alignment.CenterVertically) {
-            Box(Modifier.size(6.dp).background(Red, CircleShape)); Spacer(Modifier.width(9.dp)); Text("NPLANNER", fontFamily = FontFamily.Monospace, fontSize = 11.sp, letterSpacing = 2.sp)
+            Box(Modifier.size(6.dp).background(Red, CircleShape)); Spacer(Modifier.width(9.dp)); Text("NPLANNER 0.5", fontFamily = FontFamily.Monospace, fontSize = 11.sp, letterSpacing = 2.sp)
         }
-        Spacer(Modifier.height(30.dp)); Text(eyebrow, color = Muted, fontFamily = FontFamily.Monospace, fontSize = 10.sp, letterSpacing = 1.8.sp)
-        Text(title, fontFamily = ndot, fontWeight = FontWeight.Normal, fontSize = 42.sp, lineHeight = 45.sp, letterSpacing = 1.sp, modifier = Modifier.padding(top = 7.dp))
-        Text(subtitle, color = Muted, fontSize = 13.sp); Spacer(Modifier.height(22.dp)); content()
+        Spacer(Modifier.height(20.dp)); Text(eyebrow, color = Muted, fontFamily = FontFamily.Monospace, fontSize = 10.sp, letterSpacing = 1.8.sp)
+        DisplayTitle(title, ndot, Modifier.padding(top = 7.dp), 38.sp)
+        Text(subtitle, color = Muted, fontSize = 13.sp); Spacer(Modifier.height(14.dp)); content()
     }
 }
 
 @Composable private fun TodayScreen(ndot: FontFamily, date: LocalDate, rules: List<Rule>, completed: (Rule) -> Boolean, setCompleted: (Rule, Boolean) -> Unit, tick: Int) {
     val done = remember(rules, date, tick) { rules.count(completed) }
     val progress by animateFloatAsState(if (rules.isEmpty()) 1f else done.toFloat() / rules.size, label = "progress")
-    Screen(ndot, "DEIN RHYTHMUS.", "HEUTE", date.format(DateTimeFormatter.ofPattern("EEEE, d. MMMM", Locale.GERMAN))) {
+    Screen(ndot, "DEIN RHYTHMUS.", "HEUTE", date.format(DateTimeFormatter.ofPattern("EEEE, d. MMMM", Locale.GERMAN)), scrollable = false) {
         ProgressOrbit(progress, done, rules.size)
         Text(if (done == rules.size) "Dein Tag ist abgeschlossen." else "${rules.size - done} ${if (rules.size - done == 1) "Aufgabe wartet" else "Aufgaben warten"} noch auf dich.", color = Muted, fontSize = 12.sp, modifier = Modifier.align(Alignment.CenterHorizontally))
-        Spacer(Modifier.height(28.dp))
+        Spacer(Modifier.height(18.dp))
         if (done == rules.size) {
-            Text("FÜR HEUTE FERTIG.", fontFamily = ndot, fontWeight = FontWeight.Normal, fontSize = 29.sp, modifier = Modifier.align(Alignment.CenterHorizontally))
+            DisplayTitle("FÜR HEUTE FERTIG.", ndot, Modifier.align(Alignment.CenterHorizontally), 29.sp)
             Text("Alles erledigt. Der Rest des Tages gehört dir.", color = Muted, fontSize = 13.sp, modifier = Modifier.align(Alignment.CenterHorizontally).padding(top = 8.dp, bottom = 25.dp))
         } else {
             SectionLabel("FÜR HEUTE GEPLANT")
@@ -160,28 +167,28 @@ class MainActivity : ComponentActivity() {
 }
 
 @Composable private fun ProgressOrbit(progress: Float, done: Int, total: Int) {
-    Box(Modifier.fillMaxWidth().height(215.dp), contentAlignment = Alignment.Center) {
-        Canvas(Modifier.size(178.dp)) {
+    Box(Modifier.fillMaxWidth().height(174.dp), contentAlignment = Alignment.Center) {
+        Canvas(Modifier.size(154.dp)) {
             val stroke = 5.dp.toPx(); val inset = stroke / 2
             drawArc(Color(0xFF242424), -125f, 360f, false, Offset(inset, inset), Size(size.width-stroke, size.height-stroke), style = Stroke(stroke, cap = StrokeCap.Round))
             drawArc(White, -125f, 360f * progress, false, Offset(inset, inset), Size(size.width-stroke, size.height-stroke), style = Stroke(stroke, cap = StrokeCap.Round))
         }
         Column(horizontalAlignment = Alignment.CenterHorizontally) {
-            Text("$done / $total", fontSize = 46.sp, fontWeight = FontWeight.Light)
+            Text("$done / $total", fontSize = 40.sp, fontWeight = FontWeight.Light)
             Text(if (done == total) "GESCHAFFT" else "ERLEDIGT", color = Muted, fontFamily = FontFamily.Monospace, fontSize = 9.sp, letterSpacing = 2.sp)
         }
     }
 }
 
 @Composable private fun TaskRow(rule: Rule, checked: Boolean, click: () -> Unit) {
-    Row(Modifier.fillMaxWidth().clickable(onClick = click).padding(18.dp), verticalAlignment = Alignment.CenterVertically) {
-        Box(Modifier.size(27.dp).background(if (checked) White else Color.Transparent, CircleShape).then(if (!checked) Modifier.background(Color.Transparent) else Modifier), contentAlignment = Alignment.Center) { Text(if (checked) "✓" else "○", color = if (checked) Bg else Muted, fontSize = 17.sp) }
-        Spacer(Modifier.width(15.dp)); Column { Text(rule.name, color = if (checked) Muted else White, fontSize = 15.sp); Text(dayLabel(rule.days), color = Muted, fontSize = 10.sp) }
+    Row(Modifier.fillMaxWidth().clickable(onClick = click).padding(horizontal = 15.dp, vertical = 11.dp), verticalAlignment = Alignment.CenterVertically) {
+        Box(Modifier.size(34.dp).background(if (checked) White else Color.Transparent, CircleShape).then(if (!checked) Modifier.background(Color.Transparent) else Modifier), contentAlignment = Alignment.Center) { Text(if (checked) "✓" else "○", color = if (checked) Bg else Muted, fontSize = 20.sp) }
+        Spacer(Modifier.width(14.dp)); Column { Text(rule.name, color = if (checked) Muted else White, fontSize = 17.sp); Text(dayLabel(rule.days), color = Muted, fontSize = 11.sp) }
     }
 }
 
 @Composable private fun WeeklySummary() {
-    HorizontalDivider(color = Color(0xFF242424), modifier = Modifier.padding(top = 24.dp, bottom = 17.dp))
+    HorizontalDivider(color = Color(0xFF242424), modifier = Modifier.padding(top = 16.dp, bottom = 12.dp))
     Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
         Column(Modifier.weight(1f)) { Text("Sport", fontSize = 14.sp); Text("Dein flexibler Wochenfortschritt", color = Muted, fontSize = 10.sp); Row(Modifier.padding(top = 9.dp), horizontalArrangement = Arrangement.spacedBy(6.dp)) { repeat(4) { Box(Modifier.size(5.dp).background(if (it < 3) White else Color(0xFF333333), CircleShape)) } } }
         Text("3 / 4", color = Color.LightGray, fontFamily = FontFamily.Monospace, fontSize = 18.sp)
@@ -240,7 +247,7 @@ private enum class NavGlyph { TODAY, HISTORY, STATS, SETUP }
 @Composable private fun GlyphNav(page: Int, select: (Int) -> Unit, modifier: Modifier) {
     val glyphs = listOf(NavGlyph.TODAY, NavGlyph.HISTORY, NavGlyph.STATS, NavGlyph.SETUP)
     Surface(
-        modifier.navigationBarsPadding().padding(horizontal = 18.dp, vertical = 14.dp).fillMaxWidth().height(68.dp),
+        modifier.navigationBarsPadding().padding(horizontal = 18.dp, vertical = 14.dp).fillMaxWidth().height(64.dp),
         color = Color(0xE6252525), shape = RoundedCornerShape(34.dp), shadowElevation = 14.dp
     ) {
         Row(Modifier.padding(6.dp), horizontalArrangement = Arrangement.spacedBy(4.dp)) {
@@ -284,14 +291,22 @@ private enum class NavGlyph { TODAY, HISTORY, STATS, SETUP }
                 }
             }
             NavGlyph.SETUP -> {
-                // Simple gear: 8 teeth, outer ring and center hole.
-                val outer=size.width*.34f; val tooth=size.width*.44f
-                drawCircle(color,outer,Offset(cx,cy),style=Stroke(w))
-                drawCircle(color,size.width*.13f,Offset(cx,cy),style=Stroke(w))
+                // Compact conventional settings gear.
+                val ring = size.width * .285f
+                val hub = size.width * .105f
+                drawCircle(color, ring, Offset(cx, cy), style = Stroke(w))
+                drawCircle(color, hub, Offset(cx, cy), style = Stroke(w))
                 repeat(8) { i ->
-                    val a=Math.toRadians((i*45.0)-90.0)
-                    val ca=kotlin.math.cos(a).toFloat(); val sa=kotlin.math.sin(a).toFloat()
-                    line(cx+ca*outer,cy+sa*outer,cx+ca*tooth,cy+sa*tooth)
+                    val a = Math.toRadians((i * 45.0) - 90.0)
+                    val ca = kotlin.math.cos(a).toFloat(); val sa = kotlin.math.sin(a).toFloat()
+                    val tangentX = -sa; val tangentY = ca
+                    val inner = size.width * .31f; val outer = size.width * .405f; val half = 1.8.dp.toPx()
+                    val p1 = Offset(cx + ca*inner + tangentX*half, cy + sa*inner + tangentY*half)
+                    val p2 = Offset(cx + ca*outer + tangentX*half, cy + sa*outer + tangentY*half)
+                    val p3 = Offset(cx + ca*outer - tangentX*half, cy + sa*outer - tangentY*half)
+                    val p4 = Offset(cx + ca*inner - tangentX*half, cy + sa*inner - tangentY*half)
+                    val path = androidx.compose.ui.graphics.Path().apply { moveTo(p1.x,p1.y); lineTo(p2.x,p2.y); lineTo(p3.x,p3.y); lineTo(p4.x,p4.y); close() }
+                    drawPath(path, color)
                 }
             }
         }
