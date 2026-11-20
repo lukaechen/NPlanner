@@ -44,6 +44,8 @@ private val Red = Color(0xFFE03930)
 
 data class Rule(val id: String, val name: String, val days: Set<Int>)
 
+private val LocalDotHeadings = compositionLocalOf { false }
+
 class MainActivity : ComponentActivity() {
     private val prefs by lazy { getSharedPreferences("nplanner-v2", MODE_PRIVATE) }
 
@@ -91,18 +93,25 @@ class MainActivity : ComponentActivity() {
         var tick by remember { mutableIntStateOf(0) }
         var addDialog by remember { mutableStateOf(false) }
         var newName by remember { mutableStateOf("") }
+        var dotHeadings by remember { mutableStateOf(prefs.getBoolean("use_ndot_headings", false)) }
 
         LaunchedEffect(Unit) { while (true) { date = LocalDate.now(); delay(30_000) } }
         fun doneKey(rule: Rule, d: LocalDate = date) = "done:$d:${rule.id}"
         fun completed(rule: Rule, d: LocalDate = date) = prefs.getBoolean(doneKey(rule, d), false)
         fun setCompleted(rule: Rule, value: Boolean) { prefs.edit().putBoolean(doneKey(rule), value).apply(); tick++ }
 
+        CompositionLocalProvider(LocalDotHeadings provides dotHeadings) {
         Box(Modifier.fillMaxSize().background(Bg)) {
             when (page) {
                 0 -> TodayScreen(ndot, date, rules.filter { date.dayOfWeek.value in it.days }, ::completed, ::setCompleted, tick)
                 1 -> HistoryScreen(ndot, date, rules, ::completed, tick)
                 2 -> StatsScreen(ndot, date, rules, ::completed, tick)
                 else -> SetupScreen(ndot, rules,
+                    useDotHeadings = dotHeadings,
+                    onHeadingStyleChange = { enabled ->
+                        dotHeadings = enabled
+                        prefs.edit().putBoolean("use_ndot_headings", enabled).apply()
+                    },
                     onMove = { from, to -> rules = rules.toMutableList().also { val x = it.removeAt(from); it.add(to, x) }; saveRules(rules) },
                     onAdd = { addDialog = true }
                 )
@@ -122,20 +131,29 @@ class MainActivity : ComponentActivity() {
             }) { Text("Anlegen") } },
             dismissButton = { TextButton(onClick = { addDialog = false }) { Text("Abbrechen") } }
         )
+        }
     }
 }
 
 @Composable private fun DisplayTitle(text: String, ndot: FontFamily, modifier: Modifier = Modifier, fontSize: androidx.compose.ui.unit.TextUnit = 38.sp) {
-    // The current uploaded font file renders empty glyphs on-device. Keep titles visible and mark the exact switch point.
-    // After a verified NDOT47 TTF is uploaded, replace FontFamily.Monospace below with ndot.
-    Text(text, modifier = modifier, color = White, fontFamily = FontFamily.Monospace, fontWeight = FontWeight.Bold, fontSize = fontSize, lineHeight = fontSize * 1.05f, letterSpacing = 2.sp)
+    val useDot = LocalDotHeadings.current
+    Text(
+        text = text,
+        modifier = modifier,
+        color = White,
+        fontFamily = if (useDot) ndot else FontFamily.SansSerif,
+        fontWeight = if (useDot) FontWeight.Normal else FontWeight.Light,
+        fontSize = fontSize,
+        lineHeight = fontSize * 1.12f,
+        letterSpacing = if (useDot) 1.sp else (-0.8).sp
+    )
 }
 
 @Composable private fun Screen(ndot: FontFamily, eyebrow: String, title: String, subtitle: String, scrollable: Boolean = true, content: @Composable ColumnScope.() -> Unit) {
     val base = Modifier.fillMaxSize().padding(horizontal = 22.dp).padding(top = 20.dp, bottom = 102.dp)
     Column(if (scrollable) base.verticalScroll(rememberScrollState()) else base) {
         Row(verticalAlignment = Alignment.CenterVertically) {
-            Box(Modifier.size(6.dp).background(Red, CircleShape)); Spacer(Modifier.width(9.dp)); Text("NPLANNER 0.5", fontFamily = FontFamily.Monospace, fontSize = 11.sp, letterSpacing = 2.sp)
+            Box(Modifier.size(6.dp).background(Red, CircleShape)); Spacer(Modifier.width(9.dp)); Text("NPLANNER 0.6", fontFamily = FontFamily.Monospace, fontSize = 11.sp, letterSpacing = 2.sp)
         }
         Spacer(Modifier.height(20.dp)); Text(eyebrow, color = Muted, fontFamily = FontFamily.Monospace, fontSize = 10.sp, letterSpacing = 1.8.sp)
         DisplayTitle(title, ndot, Modifier.padding(top = 7.dp), 38.sp)
@@ -224,9 +242,32 @@ class MainActivity : ComponentActivity() {
 
 @Composable private fun StatCard(label: String, value: String, modifier: Modifier) { Surface(modifier, color=Panel, shape=RoundedCornerShape(24.dp)) { Column(Modifier.padding(20.dp)) { SectionLabel(label); Text(value, fontSize=34.sp) } } }
 
-@Composable private fun SetupScreen(ndot: FontFamily, rules: List<Rule>, onMove: (Int, Int) -> Unit, onAdd: () -> Unit) {
+@Composable private fun SetupScreen(ndot: FontFamily, rules: List<Rule>, useDotHeadings: Boolean, onHeadingStyleChange: (Boolean) -> Unit, onMove: (Int, Int) -> Unit, onAdd: () -> Unit) {
     Screen(ndot, "DEINE REGELN.", "EINSTELLUNGEN", "Einmal planen. Im Alltag nur erledigen.") {
-        SectionLabel("REGELMÄSSIGE AUFGABEN")
+        SectionLabel("DARSTELLUNG")
+ Surface(color = Panel, shape = RoundedCornerShape(22.dp), modifier = Modifier.fillMaxWidth()) {
+     Column(Modifier.padding(16.dp)) {
+         Text("Überschriftenschrift", fontSize = 16.sp, color = White)
+         Text("Normaler Text bleibt in der Systemschrift.", fontSize = 11.sp, color = Muted)
+         Spacer(Modifier.height(12.dp))
+         Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+             listOf(false to "Klassisch", true to "N-Dot").forEach { (dot, label) ->
+                 Surface(
+                     modifier = Modifier.weight(1f).clickable { onHeadingStyleChange(dot) },
+                     color = if (useDotHeadings == dot) White else Panel2,
+                     shape = RoundedCornerShape(16.dp)
+                 ) {
+                     Text(label, color = if (useDotHeadings == dot) Bg else White,
+                         fontSize = 13.sp, modifier = Modifier.padding(vertical = 12.dp, horizontal = 10.dp))
+                 }
+             }
+         }
+         Spacer(Modifier.height(10.dp))
+         DisplayTitle("NPLANNER", ndot, fontSize = 25.sp)
+     }
+ }
+
+ SectionLabel("REGELMÄSSIGE AUFGABEN")
         rules.forEachIndexed { index, rule ->
             Surface(color=Panel, shape=RoundedCornerShape(22.dp), modifier=Modifier.fillMaxWidth().padding(vertical=5.dp)) {
                 Row(Modifier.padding(12.dp), verticalAlignment=Alignment.CenterVertically) {
