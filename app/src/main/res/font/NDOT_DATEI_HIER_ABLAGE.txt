@@ -1,7 +1,0 @@
-Die vorhandene Schriftdatei muss exakt so heißen:
-ndot_47.otf
-
-Zielpfad:
-app/src/main/res/font/ndot_47.otf
-
-Diese Hinweisedatei anschließend löschen.
