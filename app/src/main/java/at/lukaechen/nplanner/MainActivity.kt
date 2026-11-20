@@ -77,10 +77,23 @@ class MainActivity : ComponentActivity() {
         setContent {
             val ndot = FontFamily(androidx.compose.ui.text.font.Font(resId = R.font.ndot_47))
             MaterialTheme(
-                colorScheme = darkColorScheme(primary = White, background = Bg, surface = Panel, onBackground = White, onSurface = White),
+                colorScheme = darkColorScheme(
+                    primary = White,
+                    onPrimary = Bg,
+                    background = Bg,
+                    onBackground = White,
+                    surface = Panel,
+                    onSurface = White,
+                    surfaceVariant = Panel2,
+                    onSurfaceVariant = White,
+                    secondary = White,
+                    onSecondary = Bg
+                ),
                 typography = Typography()
             ) {
-                NPlanner(ndot)
+                CompositionLocalProvider(LocalContentColor provides White) {
+                    NPlanner(ndot)
+                }
             }
         }
     }
@@ -141,7 +154,7 @@ class MainActivity : ComponentActivity() {
         text = text,
         modifier = modifier,
         color = White,
-        fontFamily = if (useDot) ndot else FontFamily.SansSerif,
+        fontFamily = if (useDot) ndot else FontFamily.Default,
         fontWeight = if (useDot) FontWeight.Normal else FontWeight.Light,
         fontSize = fontSize,
         lineHeight = fontSize * 1.12f,
@@ -153,7 +166,7 @@ class MainActivity : ComponentActivity() {
     val base = Modifier.fillMaxSize().padding(horizontal = 22.dp).padding(top = 20.dp, bottom = 102.dp)
     Column(if (scrollable) base.verticalScroll(rememberScrollState()) else base) {
         Row(verticalAlignment = Alignment.CenterVertically) {
-            Box(Modifier.size(6.dp).background(Red, CircleShape)); Spacer(Modifier.width(9.dp)); Text("NPLANNER 0.6", fontFamily = FontFamily.Monospace, fontSize = 11.sp, letterSpacing = 2.sp)
+            Box(Modifier.size(6.dp).background(Red, CircleShape)); Spacer(Modifier.width(9.dp)); Text("NPLANNER 0.7", color = White, fontFamily = FontFamily.Monospace, fontSize = 11.sp, letterSpacing = 2.sp)
         }
         Spacer(Modifier.height(20.dp)); Text(eyebrow, color = Muted, fontFamily = FontFamily.Monospace, fontSize = 10.sp, letterSpacing = 1.8.sp)
         DisplayTitle(title, ndot, Modifier.padding(top = 7.dp), 38.sp)
@@ -247,7 +260,7 @@ class MainActivity : ComponentActivity() {
         SectionLabel("DARSTELLUNG")
  Surface(color = Panel, shape = RoundedCornerShape(22.dp), modifier = Modifier.fillMaxWidth()) {
      Column(Modifier.padding(16.dp)) {
-         Text("Überschriftenschrift", fontSize = 16.sp, color = White)
+         Text("ÜBERSCHRIFTEN", fontSize = 16.sp, color = White, fontWeight = FontWeight.Medium)
          Text("Normaler Text bleibt in der Systemschrift.", fontSize = 11.sp, color = Muted)
          Spacer(Modifier.height(12.dp))
          Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
@@ -257,8 +270,12 @@ class MainActivity : ComponentActivity() {
                      color = if (useDotHeadings == dot) White else Panel2,
                      shape = RoundedCornerShape(16.dp)
                  ) {
-                     Text(label, color = if (useDotHeadings == dot) Bg else White,
-                         fontSize = 13.sp, modifier = Modifier.padding(vertical = 12.dp, horizontal = 10.dp))
+                     Text(
+                         text = (if (useDotHeadings == dot) "✓  " else "") + label,
+                         color = if (useDotHeadings == dot) Bg else White,
+                         fontSize = 13.sp,
+                         modifier = Modifier.padding(vertical = 12.dp, horizontal = 10.dp)
+                     )
                  }
              }
          }
@@ -271,14 +288,14 @@ class MainActivity : ComponentActivity() {
         rules.forEachIndexed { index, rule ->
             Surface(color=Panel, shape=RoundedCornerShape(22.dp), modifier=Modifier.fillMaxWidth().padding(vertical=5.dp)) {
                 Row(Modifier.padding(12.dp), verticalAlignment=Alignment.CenterVertically) {
-                    Text("⠿", color=Muted, fontSize=24.sp, modifier=Modifier.padding(horizontal=7.dp)); Column(Modifier.weight(1f)) { Text(rule.name); Text(dayLabel(rule.days), color=Muted, fontSize=10.sp) }
+                    Text("⠿", color=Muted, fontSize=24.sp, modifier=Modifier.padding(horizontal=7.dp)); Column(Modifier.weight(1f)) { Text(rule.name, color=White); Text(dayLabel(rule.days), color=Muted, fontSize=10.sp) }
                     TextButton(enabled=index>0, onClick={onMove(index,index-1)}) { Text("↑") }; TextButton(enabled=index<rules.lastIndex, onClick={onMove(index,index+1)}) { Text("↓") }
                 }
             }
         }
         Button(onClick=onAdd, modifier=Modifier.fillMaxWidth().padding(top=18.dp), shape=RoundedCornerShape(22.dp), colors=ButtonDefaults.buttonColors(containerColor=White, contentColor=Bg)) { Text("Neue Aufgabe anlegen") }
         SectionLabel("FLEXIBLES WOCHENZIEL")
-        Surface(color=Panel, shape=RoundedCornerShape(22.dp), modifier=Modifier.fillMaxWidth()) { Row(Modifier.padding(19.dp)) { Column(Modifier.weight(1f)) { Text("Sport"); Text("4× pro Woche · Mo, Di, Do, Fr bevorzugt", color=Muted, fontSize=10.sp) }; Text("›", color=Muted, fontSize=22.sp) } }
+        Surface(color=Panel, shape=RoundedCornerShape(22.dp), modifier=Modifier.fillMaxWidth()) { Row(Modifier.padding(19.dp)) { Column(Modifier.weight(1f)) { Text("Sport", color=White); Text("4× pro Woche · Mo, Di, Do, Fr bevorzugt", color=Muted, fontSize=10.sp) }; Text("›", color=Muted, fontSize=22.sp) } }
         Text("Dieser Build portiert die visuelle Struktur des HTML-Prototyps. Bearbeiten, Drag-and-drop, Room-Verlauf und Widgets folgen auf dieser UI-Basis.", color=Muted, fontSize=11.sp, modifier=Modifier.padding(6.dp,20.dp))
     }
 }
