@@ -128,7 +128,7 @@ class MainActivity : ComponentActivity() {
 @Composable private fun DisplayTitle(text: String, ndot: FontFamily, modifier: Modifier = Modifier, fontSize: androidx.compose.ui.unit.TextUnit = 38.sp) {
     // The current uploaded font file renders empty glyphs on-device. Keep titles visible and mark the exact switch point.
     // After a verified NDOT47 TTF is uploaded, replace FontFamily.Monospace below with ndot.
-    Text(text, modifier = modifier, fontFamily = FontFamily.Monospace, fontWeight = FontWeight.Bold, fontSize = fontSize, lineHeight = fontSize * 1.05f, letterSpacing = 2.sp)
+    Text(text, modifier = modifier, color = White, fontFamily = FontFamily.Monospace, fontWeight = FontWeight.Bold, fontSize = fontSize, lineHeight = fontSize * 1.05f, letterSpacing = 2.sp)
 }
 
 @Composable private fun Screen(ndot: FontFamily, eyebrow: String, title: String, subtitle: String, scrollable: Boolean = true, content: @Composable ColumnScope.() -> Unit) {
