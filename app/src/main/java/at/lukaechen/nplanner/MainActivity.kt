@@ -115,7 +115,7 @@ class MainActivity : ComponentActivity() {
             onDismissRequest = { addDialog = false },
             containerColor = Panel,
             shape = RoundedCornerShape(28.dp),
-            title = { Text("Neue Aufgabe", fontFamily = ndot, fontSize = 24.sp) },
+            title = { Text("NEUE AUFGABE", fontFamily = ndot, fontSize = 24.sp) },
             text = { OutlinedTextField(newName, { newName = it.take(60) }, label = { Text("Bezeichnung") }, singleLine = true) },
             confirmButton = { TextButton(enabled = newName.isNotBlank(), onClick = {
                 rules = rules + Rule(UUID.randomUUID().toString(), newName.trim(), (1..7).toSet())
@@ -140,12 +140,12 @@ class MainActivity : ComponentActivity() {
 @Composable private fun TodayScreen(ndot: FontFamily, date: LocalDate, rules: List<Rule>, completed: (Rule) -> Boolean, setCompleted: (Rule, Boolean) -> Unit, tick: Int) {
     val done = remember(rules, date, tick) { rules.count(completed) }
     val progress by animateFloatAsState(if (rules.isEmpty()) 1f else done.toFloat() / rules.size, label = "progress")
-    Screen(ndot, "DEIN RHYTHMUS.", "Heute", date.format(DateTimeFormatter.ofPattern("EEEE, d. MMMM", Locale.GERMAN))) {
+    Screen(ndot, "DEIN RHYTHMUS.", "HEUTE", date.format(DateTimeFormatter.ofPattern("EEEE, d. MMMM", Locale.GERMAN))) {
         ProgressOrbit(progress, done, rules.size)
         Text(if (done == rules.size) "Dein Tag ist abgeschlossen." else "${rules.size - done} ${if (rules.size - done == 1) "Aufgabe wartet" else "Aufgaben warten"} noch auf dich.", color = Muted, fontSize = 12.sp, modifier = Modifier.align(Alignment.CenterHorizontally))
         Spacer(Modifier.height(28.dp))
         if (done == rules.size) {
-            Text("Für heute fertig.", fontFamily = ndot, fontSize = 30.sp, modifier = Modifier.align(Alignment.CenterHorizontally))
+            Text("FÜR HEUTE FERTIG.", fontFamily = ndot, fontSize = 30.sp, modifier = Modifier.align(Alignment.CenterHorizontally))
             Text("Alles erledigt. Der Rest des Tages gehört dir.", color = Muted, fontSize = 13.sp, modifier = Modifier.align(Alignment.CenterHorizontally).padding(top = 8.dp, bottom = 25.dp))
         } else {
             SectionLabel("FÜR HEUTE GEPLANT")
@@ -192,7 +192,7 @@ class MainActivity : ComponentActivity() {
 @Composable private fun WeekScreen(ndot: FontFamily, date: LocalDate, rules: List<Rule>, prefs: android.content.SharedPreferences, tick: Int, refresh: () -> Unit) {
     var selected by remember { mutableIntStateOf(date.dayOfWeek.value) }
     val monday = date.minusDays((date.dayOfWeek.value - 1).toLong())
-    Screen(ndot, "PLATZ FÜR FLEXIBILITÄT.", "Deine Woche", "${monday.format(DateTimeFormatter.ofPattern("d. MMM"))} – ${monday.plusDays(6).format(DateTimeFormatter.ofPattern("d. MMM"))}") {
+    Screen(ndot, "PLATZ FÜR FLEXIBILITÄT.", "DEINE WOCHE", "${monday.format(DateTimeFormatter.ofPattern("d. MMM"))} – ${monday.plusDays(6).format(DateTimeFormatter.ofPattern("d. MMM"))}") {
         Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(6.dp)) { listOf("Mo","Di","Mi","Do","Fr","Sa","So").forEachIndexed { i, d -> FilterChip(selected == i+1, { selected = i+1 }, { Text(d, fontSize=10.sp) }, modifier=Modifier.weight(1f)) } }
         SectionLabel(listOf("MONTAG","DIENSTAG","MITTWOCH","DONNERSTAG","FREITAG","SAMSTAG","SONNTAG")[selected-1])
         Column(Modifier.clip(RoundedCornerShape(26.dp)).background(Panel)) { rules.filter { selected in it.days }.forEach { TaskRow(it, false) {} } }
@@ -202,7 +202,7 @@ class MainActivity : ComponentActivity() {
 }
 
 @Composable private fun HistoryScreen(ndot: FontFamily, date: LocalDate, rules: List<Rule>, completed: (Rule) -> Boolean, tick: Int) {
-    Screen(ndot, "JEDER TAG ZÄHLT.", "Rückblick", date.format(DateTimeFormatter.ofPattern("MMMM yyyy", Locale.GERMAN))) {
+    Screen(ndot, "JEDER TAG ZÄHLT.", "RÜCKBLICK", date.format(DateTimeFormatter.ofPattern("MMMM yyyy", Locale.GERMAN))) {
         Text("Der native Monatskalender wird im nächsten Datenbank-Schritt mit echten Tageswerten befüllt.", color = Muted)
         Spacer(Modifier.height(18.dp)); Surface(color=Panel, shape=RoundedCornerShape(26.dp), modifier=Modifier.fillMaxWidth()) { Text("Aktueller Tag: ${rules.count(completed)} von ${rules.size} erledigt", modifier=Modifier.padding(22.dp)) }
     }
@@ -210,7 +210,7 @@ class MainActivity : ComponentActivity() {
 
 @Composable private fun StatsScreen(ndot: FontFamily, date: LocalDate, rules: List<Rule>, completed: (Rule) -> Boolean, tick: Int) {
     val done = rules.count(completed)
-    Screen(ndot, "DRANBLEIBEN, NICHT PERFEKT SEIN.", "Fortschritt", "Aktueller Datenstand") {
+    Screen(ndot, "DRANBLEIBEN, NICHT PERFEKT SEIN.", "FORTSCHRITT", "Aktueller Datenstand") {
         ProgressOrbit(if(rules.isEmpty()) 1f else done.toFloat()/rules.size, done, rules.size)
         Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(12.dp)) { StatCard("HEUTE", "$done/${rules.size}", Modifier.weight(1f)); StatCard("SPORT", "3/4", Modifier.weight(1f)) }
     }
@@ -219,7 +219,7 @@ class MainActivity : ComponentActivity() {
 @Composable private fun StatCard(label: String, value: String, modifier: Modifier) { Surface(modifier, color=Panel, shape=RoundedCornerShape(24.dp)) { Column(Modifier.padding(20.dp)) { SectionLabel(label); Text(value, fontSize=34.sp) } } }
 
 @Composable private fun SetupScreen(ndot: FontFamily, rules: List<Rule>, onMove: (Int, Int) -> Unit, onAdd: () -> Unit) {
-    Screen(ndot, "DEINE REGELN.", "Einstellungen", "Einmal planen. Im Alltag nur erledigen.") {
+    Screen(ndot, "DEINE REGELN.", "EINSTELLUNGEN", "Einmal planen. Im Alltag nur erledigen.") {
         SectionLabel("REGELMÄSSIGE AUFGABEN")
         rules.forEachIndexed { index, rule ->
             Surface(color=Panel, shape=RoundedCornerShape(22.dp), modifier=Modifier.fillMaxWidth().padding(vertical=5.dp)) {
@@ -236,11 +236,60 @@ class MainActivity : ComponentActivity() {
     }
 }
 
+private enum class NavGlyph { TODAY, WEEK, HISTORY, STATS, SETUP }
+
 @Composable private fun GlyphNav(page: Int, select: (Int) -> Unit, modifier: Modifier) {
-    Surface(modifier.navigationBarsPadding().padding(horizontal=18.dp, vertical=14.dp).fillMaxWidth().height(69.dp), color=Color(0xE6252525), shape=RoundedCornerShape(36.dp), shadowElevation=14.dp) {
-        Row(Modifier.padding(6.dp), horizontalArrangement=Arrangement.spacedBy(3.dp)) {
-            listOf("Heute" to "◉", "Woche" to "□", "Verlauf" to "↶", "Stats" to "▥", "Setup" to "⚙").forEachIndexed { i, item ->
-                Column(Modifier.weight(1f).fillMaxHeight().clip(RoundedCornerShape(29.dp)).background(if(page==i) White else Color.Transparent).clickable { select(i) }, horizontalAlignment=Alignment.CenterHorizontally, verticalArrangement=Arrangement.Center) { Text(item.second, color=if(page==i) Bg else Muted, fontSize=17.sp); Text(item.first, color=if(page==i) Bg else Muted, fontSize=8.sp) }
+    val glyphs = listOf(NavGlyph.TODAY, NavGlyph.WEEK, NavGlyph.HISTORY, NavGlyph.STATS, NavGlyph.SETUP)
+    Surface(
+        modifier.navigationBarsPadding().padding(horizontal = 18.dp, vertical = 14.dp).fillMaxWidth().height(68.dp),
+        color = Color(0xE6252525), shape = RoundedCornerShape(34.dp), shadowElevation = 14.dp
+    ) {
+        Row(Modifier.padding(6.dp), horizontalArrangement = Arrangement.spacedBy(4.dp)) {
+            glyphs.forEachIndexed { i, glyph ->
+                Box(
+                    Modifier.weight(1f).fillMaxHeight().clip(CircleShape)
+                        .background(if (page == i) White else Color.Transparent)
+                        .clickable { select(i) },
+                    contentAlignment = Alignment.Center
+                ) { NavIcon(glyph, if (page == i) Bg else Color(0xFF969696)) }
+            }
+        }
+    }
+}
+
+@Composable private fun NavIcon(glyph: NavGlyph, color: Color) {
+    Canvas(Modifier.size(25.dp)) {
+        val w = 1.7.dp.toPx()
+        fun line(a: Offset, b: Offset) = drawLine(color, a, b, w, StrokeCap.Round)
+        when (glyph) {
+            NavGlyph.TODAY -> {
+                drawCircle(color, radius = size.minDimension * .39f, style = Stroke(w))
+                line(Offset(size.width*.31f,size.height*.52f), Offset(size.width*.45f,size.height*.66f))
+                line(Offset(size.width*.45f,size.height*.66f), Offset(size.width*.72f,size.height*.36f))
+            }
+            NavGlyph.WEEK -> {
+                val left=size.width*.15f; val top=size.height*.24f; val right=size.width*.85f; val bottom=size.height*.82f
+                drawRoundRect(color, Offset(left,top), Size(right-left,bottom-top), cornerRadius=androidx.compose.ui.geometry.CornerRadius(3.dp.toPx()), style=Stroke(w))
+                line(Offset(left, size.height*.40f), Offset(right,size.height*.40f))
+                line(Offset(size.width*.34f,size.height*.17f),Offset(size.width*.34f,size.height*.31f)); line(Offset(size.width*.66f,size.height*.17f),Offset(size.width*.66f,size.height*.31f))
+                drawCircle(color,2.dp.toPx(),Offset(size.width*.36f,size.height*.57f)); drawCircle(color,2.dp.toPx(),Offset(size.width*.63f,size.height*.57f))
+            }
+            NavGlyph.HISTORY -> {
+                drawArc(color, 35f, 290f, false, Offset(size.width*.16f,size.height*.16f), Size(size.width*.68f,size.height*.68f), style=Stroke(w,cap=StrokeCap.Round))
+                line(Offset(size.width*.19f,size.height*.28f),Offset(size.width*.18f,size.height*.47f)); line(Offset(size.width*.19f,size.height*.28f),Offset(size.width*.36f,size.height*.32f))
+                line(Offset(size.width*.50f,size.height*.34f),Offset(size.width*.50f,size.height*.53f)); line(Offset(size.width*.50f,size.height*.53f),Offset(size.width*.64f,size.height*.61f))
+            }
+            NavGlyph.STATS -> {
+                val base=size.height*.82f; line(Offset(size.width*.18f,base),Offset(size.width*.84f,base))
+                listOf(.30f to .58f,.50f to .35f,.70f to .20f).forEach { (x,t) ->
+                    drawRoundRect(color, Offset(size.width*x-2.dp.toPx(),size.height*t), Size(4.dp.toPx(),base-size.height*t), cornerRadius=androidx.compose.ui.geometry.CornerRadius(2.dp.toPx()))
+                }
+            }
+            NavGlyph.SETUP -> {
+                drawCircle(color, radius=size.width*.17f, style=Stroke(w)); drawCircle(color,radius=size.width*.34f,style=Stroke(w))
+                repeat(8){i-> val a=Math.toRadians((i*45).toDouble()); val c=Offset(size.width/2,size.height/2); val r1=size.width*.34f; val r2=size.width*.43f
+                    line(Offset(c.x+(kotlin.math.cos(a)*r1).toFloat(),c.y+(kotlin.math.sin(a)*r1).toFloat()),Offset(c.x+(kotlin.math.cos(a)*r2).toFloat(),c.y+(kotlin.math.sin(a)*r2).toFloat()))
+                }
             }
         }
     }

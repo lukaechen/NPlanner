@@ -24,3 +24,7 @@ Dieser Build ist die visuelle Basis. Verlauf und Statistik sind noch nicht volls
 
 ## Installation
 Durch die neue Application-ID wird NPlanner als neue App neben dem bisherigen Daily-Test installiert. Das ist beabsichtigt.
+
+## 0.3 UI-Anpassung
+- Bottom-Bar ohne Beschriftungen, nur fünf selbsterklärende eigene Vektor/Canvas-Symbole: Tagescheck, Kalender, Verlauf, Statistik, Setup.
+- N-Dot-Titel werden in Großbuchstaben gesetzt. Falls die vorhandene OTF weiterhin unsichtbar rendert, ist die konkrete Fontdatei nicht Android-tauglich. Android unterstützt OTF grundsätzlich; dann bitte die OFL-NDOT-47-Datei als TTF verwenden und als `ndot_47.ttf` hochladen. Der Resource-Name bleibt `R.font.ndot_47`.
