@@ -1,21 +1,26 @@
-# Daily – nativer Teststand 0.1
+# NPlanner 0.2 – visueller Compose-Port
 
-Kotlin / Jetpack Compose, keine WebView. Erster Installations- und Buildtest, keine vollständige Portierung des HTML-Prototyps.
+Dieses Paket ersetzt den Proof-of-Concept durch eine native Jetpack-Compose-Oberfläche, die sich am letzten HTML-Prototyp orientiert.
 
-Enthalten: heutiges Datum, tägliche Aufgaben, datumsspezifische lokale Erledigungen, Aufgaben anlegen und per Pfeilen sortieren. Kein Internetzugriff in der App.
-Noch nicht enthalten: Wochenziele, Wochentage, Verlaufansicht, Statistik, Widgets, Drag-and-drop, Backup, Bearbeiten/Archivieren. Historische Erledigungen werden gespeichert, aber noch nicht angezeigt. SharedPreferences ist eine vorläufige Speicherung; vor produktiver Nutzung auf Room migrieren.
+## Unbedingt vor dem Commit
+Die bereits vorhandene Schriftdatei muss hier liegen:
 
-## Upload
-ZIP entpacken. Inhalt direkt ins Repository hochladen, nicht die ZIP und nicht einen zusätzlichen Projektordner.
-Auch .github/workflows/android.yml muss vorhanden sein. Falls der Browser den Punktordner auslässt: Add file > Create new file, Dateiname .github/workflows/android.yml; Inhalt aus workflow-zum-kopieren.txt einfügen. Diese Kopie allein startet keinen Build.
+`app/src/main/res/font/ndot_47.otf`
 
-## Build
-Actions > Android APK. Nach erfolgreichem Lauf: Artifacts > Daily-Test-APK. ZIP entpacken und app-debug.apk installieren.
-Kein Gradle Wrapper nötig: der Workflow installiert die festgelegte Gradle-Version.
+Die Datei `NDOT_DATEI_HIER_ABLAGE.txt` danach löschen.
 
-## Signierung – wichtig
-Dies ist eine Debug-APK. Ohne DEBUG_KEYSTORE_BASE64 erzeugt jeder frische Cloud-Runner einen neuen Debug-Schlüssel. Folgeversionen lassen sich dann eventuell nicht über die vorherige installieren. Nicht mit wichtigen Daten verwenden und nicht einfach deinstallieren, wenn Daten erhalten bleiben sollen.
-Optional: einen dauerhaften Android-Debug-Keystore mit den Standard-Debug-Zugangsdaten als Base64 in das Repository-Secret DEBUG_KEYSTORE_BASE64 hinterlegen. Niemals Schlüsseldateien ins Repository committen. Eine richtige Release-Signierung ist vor dauerhafter Nutzung separat einzurichten.
+## Änderungen
+- Projekt- und Appname: NPlanner
+- Application-ID: `at.lukaechen.nplanner`
+- N-Dot für Seitentitel
+- Android-Systemschrift für normalen Text
+- eigener Fortschrittsring
+- eigene schwebende Bottom-Navigation
+- HTML-nahe Heute-, Woche-, Verlauf-, Statistik- und Setup-Seiten
+- keine WebView
 
-## Prüfung
-Projektdateien erstellt, aber hier weder Android-Build noch Gerätetest durchgeführt. Der erste GitHub-Actions-Lauf ist der Kompilierungstest. Bei Fehlern den fehlgeschlagenen Schritt und die Fehlermeldung teilen.
+## Noch nicht final
+Dieser Build ist die visuelle Basis. Verlauf und Statistik sind noch nicht vollständig historisch. Room-Datenbank, echtes Wochenziel-Modell, Bearbeiten/Archivieren, natives Drag-and-drop und Widgets folgen.
+
+## Installation
+Durch die neue Application-ID wird NPlanner als neue App neben dem bisherigen Daily-Test installiert. Das ist beabsichtigt.

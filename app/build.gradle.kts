@@ -4,14 +4,14 @@ plugins {
     id("org.jetbrains.kotlin.plugin.compose")
 }
 android {
-    namespace = "at.lukas.daily"
+    namespace = "at.lukaechen.nplanner"
     compileSdk = 35
     defaultConfig {
-        applicationId = "at.lukas.daily"
+        applicationId = "at.lukaechen.nplanner"
         minSdk = 26
         targetSdk = 35
         versionCode = (System.getenv("GITHUB_RUN_NUMBER") ?: "1").toInt()
-        versionName = "0.1"
+        versionName = "0.2"
     }
     buildFeatures { compose = true }
     compileOptions { sourceCompatibility = JavaVersion.VERSION_17; targetCompatibility = JavaVersion.VERSION_17 }
