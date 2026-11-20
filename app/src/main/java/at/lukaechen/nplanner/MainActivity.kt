@@ -115,7 +115,7 @@ class MainActivity : ComponentActivity() {
             onDismissRequest = { addDialog = false },
             containerColor = Panel,
             shape = RoundedCornerShape(28.dp),
-            title = { Text("NEUE AUFGABE", fontFamily = ndot, fontSize = 24.sp) },
+            title = { DotMatrixTitle("NEUE AUFGABE", fontSize = 24.sp) },
             text = { OutlinedTextField(newName, { newName = it.take(60) }, label = { Text("Bezeichnung") }, singleLine = true) },
             confirmButton = { TextButton(enabled = newName.isNotBlank(), onClick = {
                 rules = rules + Rule(UUID.randomUUID().toString(), newName.trim(), (1..7).toSet())
@@ -126,13 +126,18 @@ class MainActivity : ComponentActivity() {
     }
 }
 
+@Composable private fun DotMatrixTitle(text: String, modifier: Modifier = Modifier, fontSize: androidx.compose.ui.unit.TextUnit = 42.sp) {
+    // Safe display layer: system glyphs plus dot-matrix texture. Avoids blank headings caused by the current OTF.
+    Text(text, modifier = modifier, fontFamily = FontFamily.Monospace, fontWeight = FontWeight.Bold, fontSize = fontSize, lineHeight = fontSize * 1.06f, letterSpacing = 2.sp)
+}
+
 @Composable private fun Screen(ndot: FontFamily, eyebrow: String, title: String, subtitle: String, content: @Composable ColumnScope.() -> Unit) {
     Column(Modifier.fillMaxSize().verticalScroll(rememberScrollState()).padding(horizontal = 22.dp).padding(top = 26.dp, bottom = 120.dp)) {
         Row(verticalAlignment = Alignment.CenterVertically) {
             Box(Modifier.size(6.dp).background(Red, CircleShape)); Spacer(Modifier.width(9.dp)); Text("NPLANNER", fontFamily = FontFamily.Monospace, fontSize = 11.sp, letterSpacing = 2.sp)
         }
         Spacer(Modifier.height(30.dp)); Text(eyebrow, color = Muted, fontFamily = FontFamily.Monospace, fontSize = 10.sp, letterSpacing = 1.8.sp)
-        Text(title, fontFamily = ndot, fontSize = 42.sp, lineHeight = 45.sp, modifier = Modifier.padding(top = 7.dp))
+        DotMatrixTitle(title, Modifier.padding(top = 7.dp))
         Text(subtitle, color = Muted, fontSize = 13.sp); Spacer(Modifier.height(22.dp)); content()
     }
 }
@@ -145,7 +150,7 @@ class MainActivity : ComponentActivity() {
         Text(if (done == rules.size) "Dein Tag ist abgeschlossen." else "${rules.size - done} ${if (rules.size - done == 1) "Aufgabe wartet" else "Aufgaben warten"} noch auf dich.", color = Muted, fontSize = 12.sp, modifier = Modifier.align(Alignment.CenterHorizontally))
         Spacer(Modifier.height(28.dp))
         if (done == rules.size) {
-            Text("FÜR HEUTE FERTIG.", fontFamily = ndot, fontSize = 30.sp, modifier = Modifier.align(Alignment.CenterHorizontally))
+            DotMatrixTitle("FÜR HEUTE FERTIG.", Modifier.align(Alignment.CenterHorizontally), 29.sp)
             Text("Alles erledigt. Der Rest des Tages gehört dir.", color = Muted, fontSize = 13.sp, modifier = Modifier.align(Alignment.CenterHorizontally).padding(top = 8.dp, bottom = 25.dp))
         } else {
             SectionLabel("FÜR HEUTE GEPLANT")
@@ -258,38 +263,45 @@ private enum class NavGlyph { TODAY, WEEK, HISTORY, STATS, SETUP }
 }
 
 @Composable private fun NavIcon(glyph: NavGlyph, color: Color) {
-    Canvas(Modifier.size(25.dp)) {
-        val w = 1.7.dp.toPx()
-        fun line(a: Offset, b: Offset) = drawLine(color, a, b, w, StrokeCap.Round)
-        when (glyph) {
+    Canvas(Modifier.size(26.dp)) {
+        val w = 1.75.dp.toPx(); val cx=size.width/2; val cy=size.height/2
+        fun line(x1:Float,y1:Float,x2:Float,y2:Float)=drawLine(color,Offset(x1,y1),Offset(x2,y2),w,StrokeCap.Round)
+        when(glyph) {
             NavGlyph.TODAY -> {
-                drawCircle(color, radius = size.minDimension * .39f, style = Stroke(w))
-                line(Offset(size.width*.31f,size.height*.52f), Offset(size.width*.45f,size.height*.66f))
-                line(Offset(size.width*.45f,size.height*.66f), Offset(size.width*.72f,size.height*.36f))
+                drawCircle(color,size.width*.36f,Offset(cx,cy),style=Stroke(w))
+                line(size.width*.30f,size.height*.52f,size.width*.44f,size.height*.66f)
+                line(size.width*.44f,size.height*.66f,size.width*.72f,size.height*.35f)
             }
             NavGlyph.WEEK -> {
-                val left=size.width*.15f; val top=size.height*.24f; val right=size.width*.85f; val bottom=size.height*.82f
-                drawRoundRect(color, Offset(left,top), Size(right-left,bottom-top), cornerRadius=androidx.compose.ui.geometry.CornerRadius(3.dp.toPx()), style=Stroke(w))
-                line(Offset(left, size.height*.40f), Offset(right,size.height*.40f))
-                line(Offset(size.width*.34f,size.height*.17f),Offset(size.width*.34f,size.height*.31f)); line(Offset(size.width*.66f,size.height*.17f),Offset(size.width*.66f,size.height*.31f))
-                drawCircle(color,2.dp.toPx(),Offset(size.width*.36f,size.height*.57f)); drawCircle(color,2.dp.toPx(),Offset(size.width*.63f,size.height*.57f))
+                // clean calendar outline with two binding tabs and one date square
+                val l=size.width*.18f; val t=size.height*.25f; val r=size.width*.82f; val b=size.height*.80f
+                drawRoundRect(color,Offset(l,t),Size(r-l,b-t),androidx.compose.ui.geometry.CornerRadius(4.dp.toPx()),style=Stroke(w))
+                line(l,size.height*.42f,r,size.height*.42f)
+                line(size.width*.34f,size.height*.17f,size.width*.34f,size.height*.31f)
+                line(size.width*.66f,size.height*.17f,size.width*.66f,size.height*.31f)
+                drawRoundRect(color,Offset(size.width*.42f,size.height*.53f),Size(size.width*.16f,size.height*.14f),androidx.compose.ui.geometry.CornerRadius(1.5.dp.toPx()),style=Stroke(w))
             }
             NavGlyph.HISTORY -> {
-                drawArc(color, 35f, 290f, false, Offset(size.width*.16f,size.height*.16f), Size(size.width*.68f,size.height*.68f), style=Stroke(w,cap=StrokeCap.Round))
-                line(Offset(size.width*.19f,size.height*.28f),Offset(size.width*.18f,size.height*.47f)); line(Offset(size.width*.19f,size.height*.28f),Offset(size.width*.36f,size.height*.32f))
-                line(Offset(size.width*.50f,size.height*.34f),Offset(size.width*.50f,size.height*.53f)); line(Offset(size.width*.50f,size.height*.53f),Offset(size.width*.64f,size.height*.61f))
+                // simple history clock: circular arrow + clock hands
+                drawArc(color,38f,292f,false,Offset(size.width*.17f,size.height*.17f),Size(size.width*.66f,size.height*.66f),style=Stroke(w,cap=StrokeCap.Round))
+                line(size.width*.18f,size.height*.31f,size.width*.18f,size.height*.49f)
+                line(size.width*.18f,size.height*.31f,size.width*.35f,size.height*.34f)
+                line(cx,cy,cx,size.height*.34f); line(cx,cy,size.width*.64f,size.height*.58f)
             }
             NavGlyph.STATS -> {
-                val base=size.height*.82f; line(Offset(size.width*.18f,base),Offset(size.width*.84f,base))
-                listOf(.30f to .58f,.50f to .35f,.70f to .20f).forEach { (x,t) ->
-                    drawRoundRect(color, Offset(size.width*x-2.dp.toPx(),size.height*t), Size(4.dp.toPx(),base-size.height*t), cornerRadius=androidx.compose.ui.geometry.CornerRadius(2.dp.toPx()))
-                }
+                val base=size.height*.80f
+                line(size.width*.18f,base,size.width*.82f,base)
+                val xs=listOf(.30f,.50f,.70f); val tops=listOf(.57f,.38f,.22f)
+                xs.indices.forEach { i -> drawRoundRect(color,Offset(size.width*xs[i]-2.dp.toPx(),size.height*tops[i]),Size(4.dp.toPx(),base-size.height*tops[i]),androidx.compose.ui.geometry.CornerRadius(2.dp.toPx())) }
             }
             NavGlyph.SETUP -> {
-                drawCircle(color, radius=size.width*.17f, style=Stroke(w)); drawCircle(color,radius=size.width*.34f,style=Stroke(w))
-                repeat(8){i-> val a=Math.toRadians((i*45).toDouble()); val c=Offset(size.width/2,size.height/2); val r1=size.width*.34f; val r2=size.width*.43f
-                    line(Offset(c.x+(kotlin.math.cos(a)*r1).toFloat(),c.y+(kotlin.math.sin(a)*r1).toFloat()),Offset(c.x+(kotlin.math.cos(a)*r2).toFloat(),c.y+(kotlin.math.sin(a)*r2).toFloat()))
-                }
+                // cleaner sliders icon instead of a complex gear
+                line(size.width*.20f,size.height*.31f,size.width*.80f,size.height*.31f)
+                line(size.width*.20f,size.height*.50f,size.width*.80f,size.height*.50f)
+                line(size.width*.20f,size.height*.69f,size.width*.80f,size.height*.69f)
+                drawCircle(color,3.2.dp.toPx(),Offset(size.width*.38f,size.height*.31f),style=Stroke(w))
+                drawCircle(color,3.2.dp.toPx(),Offset(size.width*.64f,size.height*.50f),style=Stroke(w))
+                drawCircle(color,3.2.dp.toPx(),Offset(size.width*.44f,size.height*.69f),style=Stroke(w))
             }
         }
     }

@@ -28,3 +28,12 @@ Durch die neue Application-ID wird NPlanner als neue App neben dem bisherigen Da
 ## 0.3 UI-Anpassung
 - Bottom-Bar ohne Beschriftungen, nur fünf selbsterklärende eigene Vektor/Canvas-Symbole: Tagescheck, Kalender, Verlauf, Statistik, Setup.
 - N-Dot-Titel werden in Großbuchstaben gesetzt. Falls die vorhandene OTF weiterhin unsichtbar rendert, ist die konkrete Fontdatei nicht Android-tauglich. Android unterstützt OTF grundsätzlich; dann bitte die OFL-NDOT-47-Datei als TTF verwenden und als `ndot_47.ttf` hochladen. Der Resource-Name bleibt `R.font.ndot_47`.
+
+## 0.4
+- Die kaputte/inkompatible OTF kann Titel nicht mehr unsichtbar machen; bis zum Austausch wird für Titel eine sichtbare Dot-Matrix-nahe Fallback-Darstellung genutzt.
+- Kalender-Icon vereinfacht.
+- Verlauf als klarere History-Uhr.
+- Setup als drei Regler statt unruhigem Zahnrad.
+- Navigation bleibt ohne Textbeschriftungen.
+
+Für echte NDOT 47 bitte die OFL-Datei vom FontStruct-Eintrag verwenden. Nach Austausch kann die Titel-Komponente wieder direkt auf R.font.ndot_47 geschaltet werden.
