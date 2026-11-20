@@ -3,7 +3,14 @@ package at.lukaechen.nplanner
 import android.os.Bundle
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
+import androidx.compose.animation.AnimatedContent
 import androidx.compose.animation.core.animateFloatAsState
+import androidx.compose.animation.core.tween
+import androidx.compose.animation.fadeIn
+import androidx.compose.animation.fadeOut
+import androidx.compose.animation.slideInHorizontally
+import androidx.compose.animation.slideOutHorizontally
+import androidx.compose.animation.togetherWith
 import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
@@ -12,10 +19,12 @@ import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
+import androidx.compose.foundation.gestures.detectHorizontalDragGestures
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.geometry.Size
 import androidx.compose.ui.draw.clip
@@ -26,6 +35,8 @@ import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import androidx.compose.ui.text.PlatformTextStyle
+import androidx.compose.ui.text.TextStyle
 import kotlinx.coroutines.delay
 import org.json.JSONArray
 import org.json.JSONObject
@@ -114,22 +125,57 @@ class MainActivity : ComponentActivity() {
         fun setCompleted(rule: Rule, value: Boolean) { prefs.edit().putBoolean(doneKey(rule), value).apply(); tick++ }
 
         CompositionLocalProvider(LocalDotHeadings provides dotHeadings) {
-        Box(Modifier.fillMaxSize().background(Bg)) {
-            when (page) {
-                0 -> TodayScreen(ndot, date, rules.filter { date.dayOfWeek.value in it.days }, ::completed, ::setCompleted, tick)
-                1 -> HistoryScreen(ndot, date, rules, ::completed, tick)
-                2 -> StatsScreen(ndot, date, rules, ::completed, tick)
-                else -> SetupScreen(ndot, rules,
-                    useDotHeadings = dotHeadings,
-                    onHeadingStyleChange = { enabled ->
-                        dotHeadings = enabled
-                        prefs.edit().putBoolean("use_ndot_headings", enabled).apply()
-                    },
-                    onMove = { from, to -> rules = rules.toMutableList().also { val x = it.removeAt(from); it.add(to, x) }; saveRules(rules) },
-                    onAdd = { addDialog = true }
-                )
+        fun selectPage(target: Int) {
+            if (target == page || target !in 0..3) return
+            page = target
+        }
+
+        var dragDistance by remember { mutableFloatStateOf(0f) }
+        Box(
+            Modifier.fillMaxSize().background(Bg)
+                .pointerInput(page) {
+                    detectHorizontalDragGestures(
+                        onDragStart = { dragDistance = 0f },
+                        onHorizontalDrag = { change, amount ->
+                            change.consume()
+                            dragDistance += amount
+                        },
+                        onDragEnd = {
+                            when {
+                                dragDistance < -90f -> selectPage(page + 1)
+                                dragDistance > 90f -> selectPage(page - 1)
+                            }
+                            dragDistance = 0f
+                        },
+                        onDragCancel = { dragDistance = 0f }
+                    )
+                }
+        ) {
+            AnimatedContent(
+                targetState = page,
+                transitionSpec = {
+                    val forward = targetState > initialState
+                    (slideInHorizontally(tween(260)) { if (forward) it / 3 else -it / 3 } + fadeIn(tween(220))) togetherWith
+                        (slideOutHorizontally(tween(260)) { if (forward) -it / 3 else it / 3 } + fadeOut(tween(180)))
+                },
+                label = "pageTransition"
+            ) { currentPage ->
+                when (currentPage) {
+                    0 -> TodayScreen(ndot, date, rules.filter { date.dayOfWeek.value in it.days }, ::completed, ::setCompleted, tick)
+                    1 -> HistoryScreen(ndot, date, rules, ::completed, tick)
+                    2 -> StatsScreen(ndot, date, rules, ::completed, tick)
+                    else -> SetupScreen(ndot, rules,
+                        useDotHeadings = dotHeadings,
+                        onHeadingStyleChange = { enabled ->
+                            dotHeadings = enabled
+                            prefs.edit().putBoolean("use_ndot_headings", enabled).apply()
+                        },
+                        onMove = { from, to -> rules = rules.toMutableList().also { val x = it.removeAt(from); it.add(to, x) }; saveRules(rules) },
+                        onAdd = { addDialog = true }
+                    )
+                }
             }
-            GlyphNav(page, { page = it }, Modifier.align(Alignment.BottomCenter))
+            GlyphNav(page, ::selectPage, Modifier.align(Alignment.BottomCenter))
         }
 
         if (addDialog) AlertDialog(
@@ -163,12 +209,13 @@ class MainActivity : ComponentActivity() {
 }
 
 @Composable private fun Screen(ndot: FontFamily, eyebrow: String, title: String, subtitle: String, scrollable: Boolean = true, content: @Composable ColumnScope.() -> Unit) {
-    val base = Modifier.fillMaxSize().padding(horizontal = 22.dp).padding(top = 20.dp, bottom = 102.dp)
+    val base = Modifier.fillMaxSize().statusBarsPadding().padding(horizontal = 22.dp).padding(top = 12.dp, bottom = 102.dp)
     Column(if (scrollable) base.verticalScroll(rememberScrollState()) else base) {
         Row(verticalAlignment = Alignment.CenterVertically) {
-            Box(Modifier.size(6.dp).background(Red, CircleShape)); Spacer(Modifier.width(9.dp)); Text("NPLANNER 0.7", color = White, fontFamily = FontFamily.Monospace, fontSize = 11.sp, letterSpacing = 2.sp)
+            Box(Modifier.size(6.dp).background(Red, CircleShape))
+            Spacer(Modifier.width(9.dp))
+            Text(eyebrow, color = Muted, fontFamily = FontFamily.Monospace, fontSize = 10.sp, letterSpacing = 1.8.sp)
         }
-        Spacer(Modifier.height(20.dp)); Text(eyebrow, color = Muted, fontFamily = FontFamily.Monospace, fontSize = 10.sp, letterSpacing = 1.8.sp)
         DisplayTitle(title, ndot, Modifier.padding(top = 7.dp), 38.sp)
         Text(subtitle, color = Muted, fontSize = 13.sp); Spacer(Modifier.height(14.dp)); content()
     }
@@ -178,7 +225,7 @@ class MainActivity : ComponentActivity() {
     val done = remember(rules, date, tick) { rules.count(completed) }
     val progress by animateFloatAsState(if (rules.isEmpty()) 1f else done.toFloat() / rules.size, label = "progress")
     Screen(ndot, "DEIN RHYTHMUS.", "HEUTE", date.format(DateTimeFormatter.ofPattern("EEEE, d. MMMM", Locale.GERMAN)), scrollable = false) {
-        ProgressOrbit(progress, done, rules.size)
+        ProgressOrbit(progress, done, rules.size, ndot)
         Text(if (done == rules.size) "Dein Tag ist abgeschlossen." else "${rules.size - done} ${if (rules.size - done == 1) "Aufgabe wartet" else "Aufgaben warten"} noch auf dich.", color = Muted, fontSize = 12.sp, modifier = Modifier.align(Alignment.CenterHorizontally))
         Spacer(Modifier.height(18.dp))
         if (done == rules.size) {
@@ -197,7 +244,7 @@ class MainActivity : ComponentActivity() {
     }
 }
 
-@Composable private fun ProgressOrbit(progress: Float, done: Int, total: Int) {
+@Composable private fun ProgressOrbit(progress: Float, done: Int, total: Int, ndot: FontFamily) {
     Box(Modifier.fillMaxWidth().height(174.dp), contentAlignment = Alignment.Center) {
         Canvas(Modifier.size(154.dp)) {
             val stroke = 5.dp.toPx(); val inset = stroke / 2
@@ -205,23 +252,41 @@ class MainActivity : ComponentActivity() {
             drawArc(White, -125f, 360f * progress, false, Offset(inset, inset), Size(size.width-stroke, size.height-stroke), style = Stroke(stroke, cap = StrokeCap.Round))
         }
         Column(horizontalAlignment = Alignment.CenterHorizontally) {
-            Text("$done / $total", fontSize = 40.sp, fontWeight = FontWeight.Light)
+            DisplayTitle("$done/$total", ndot, fontSize = 40.sp)
             Text(if (done == total) "GESCHAFFT" else "ERLEDIGT", color = Muted, fontFamily = FontFamily.Monospace, fontSize = 9.sp, letterSpacing = 2.sp)
         }
     }
 }
 
 @Composable private fun TaskRow(rule: Rule, checked: Boolean, click: () -> Unit) {
-    Row(Modifier.fillMaxWidth().clickable(onClick = click).padding(horizontal = 15.dp, vertical = 11.dp), verticalAlignment = Alignment.CenterVertically) {
-        Box(Modifier.size(34.dp).background(if (checked) White else Color.Transparent, CircleShape).then(if (!checked) Modifier.background(Color.Transparent) else Modifier), contentAlignment = Alignment.Center) { Text(if (checked) "✓" else "○", color = if (checked) Bg else Muted, fontSize = 20.sp) }
-        Spacer(Modifier.width(14.dp)); Column { Text(rule.name, color = if (checked) Muted else White, fontSize = 17.sp); Text(dayLabel(rule.days), color = Muted, fontSize = 11.sp) }
+    Row(
+        modifier = Modifier.fillMaxWidth().heightIn(min = 64.dp).clickable(onClick = click)
+            .padding(horizontal = 15.dp, vertical = 9.dp),
+        verticalAlignment = Alignment.CenterVertically
+    ) {
+        Box(
+            Modifier.size(34.dp).background(if (checked) White else Color.Transparent, CircleShape),
+            contentAlignment = Alignment.Center
+        ) {
+            Text(if (checked) "✓" else "○", color = if (checked) Bg else Muted, fontSize = 20.sp,
+                style = TextStyle(platformStyle = PlatformTextStyle(includeFontPadding = false)))
+        }
+        Spacer(Modifier.width(14.dp))
+        Box(Modifier.weight(1f).heightIn(min = 44.dp), contentAlignment = Alignment.CenterStart) {
+            Column(verticalArrangement = Arrangement.spacedBy(3.dp)) {
+                Text(rule.name, color = if (checked) Muted else White, fontSize = 17.sp, lineHeight = 20.sp,
+                    style = TextStyle(platformStyle = PlatformTextStyle(includeFontPadding = false)))
+                Text(dayLabel(rule.days), color = Muted, fontSize = 11.sp, lineHeight = 14.sp,
+                    style = TextStyle(platformStyle = PlatformTextStyle(includeFontPadding = false)))
+            }
+        }
     }
 }
 
 @Composable private fun WeeklySummary() {
     HorizontalDivider(color = Color(0xFF242424), modifier = Modifier.padding(top = 16.dp, bottom = 12.dp))
     Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
-        Column(Modifier.weight(1f)) { Text("Sport", fontSize = 14.sp); Text("Dein flexibler Wochenfortschritt", color = Muted, fontSize = 10.sp); Row(Modifier.padding(top = 9.dp), horizontalArrangement = Arrangement.spacedBy(6.dp)) { repeat(4) { Box(Modifier.size(5.dp).background(if (it < 3) White else Color(0xFF333333), CircleShape)) } } }
+        Column(Modifier.weight(1f)) { Text("Sport", color = White, fontSize = 14.sp); Text("Dein flexibler Wochenfortschritt", color = Muted, fontSize = 10.sp); Row(Modifier.padding(top = 9.dp), horizontalArrangement = Arrangement.spacedBy(6.dp)) { repeat(4) { Box(Modifier.size(5.dp).background(if (it < 3) White else Color(0xFF333333), CircleShape)) } } }
         Text("3 / 4", color = Color.LightGray, fontFamily = FontFamily.Monospace, fontSize = 18.sp)
     }
 }
@@ -248,12 +313,12 @@ class MainActivity : ComponentActivity() {
 @Composable private fun StatsScreen(ndot: FontFamily, date: LocalDate, rules: List<Rule>, completed: (Rule) -> Boolean, tick: Int) {
     val done = rules.count(completed)
     Screen(ndot, "DRANBLEIBEN, NICHT PERFEKT SEIN.", "FORTSCHRITT", "Aktueller Datenstand") {
-        ProgressOrbit(if(rules.isEmpty()) 1f else done.toFloat()/rules.size, done, rules.size)
-        Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(12.dp)) { StatCard("HEUTE", "$done/${rules.size}", Modifier.weight(1f)); StatCard("SPORT", "3/4", Modifier.weight(1f)) }
+        ProgressOrbit(if(rules.isEmpty()) 1f else done.toFloat()/rules.size, done, rules.size, ndot)
+        Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(12.dp)) { StatCard("HEUTE", "$done/${rules.size}", Modifier.weight(1f), ndot); StatCard("SPORT", "3/4", Modifier.weight(1f), ndot) }
     }
 }
 
-@Composable private fun StatCard(label: String, value: String, modifier: Modifier) { Surface(modifier, color=Panel, shape=RoundedCornerShape(24.dp)) { Column(Modifier.padding(20.dp)) { SectionLabel(label); Text(value, fontSize=34.sp) } } }
+@Composable private fun StatCard(label: String, value: String, modifier: Modifier, ndot: FontFamily) { Surface(modifier, color=Panel, shape=RoundedCornerShape(24.dp)) { Column(Modifier.padding(20.dp)) { SectionLabel(label); DisplayTitle(value, ndot, fontSize=34.sp) } } }
 
 @Composable private fun SetupScreen(ndot: FontFamily, rules: List<Rule>, useDotHeadings: Boolean, onHeadingStyleChange: (Boolean) -> Unit, onMove: (Int, Int) -> Unit, onAdd: () -> Unit) {
     Screen(ndot, "DEINE REGELN.", "EINSTELLUNGEN", "Einmal planen. Im Alltag nur erledigen.") {
@@ -297,6 +362,16 @@ class MainActivity : ComponentActivity() {
         SectionLabel("FLEXIBLES WOCHENZIEL")
         Surface(color=Panel, shape=RoundedCornerShape(22.dp), modifier=Modifier.fillMaxWidth()) { Row(Modifier.padding(19.dp)) { Column(Modifier.weight(1f)) { Text("Sport", color=White); Text("4× pro Woche · Mo, Di, Do, Fr bevorzugt", color=Muted, fontSize=10.sp) }; Text("›", color=Muted, fontSize=22.sp) } }
         Text("Dieser Build portiert die visuelle Struktur des HTML-Prototyps. Bearbeiten, Drag-and-drop, Room-Verlauf und Widgets folgen auf dieser UI-Basis.", color=Muted, fontSize=11.sp, modifier=Modifier.padding(6.dp,20.dp))
+        HorizontalDivider(color = Color(0xFF242424), modifier = Modifier.padding(top = 8.dp))
+        Text(
+            "NPLANNER · VERSION 0.9",
+            color = Color(0xFFB6B6B6),
+            fontFamily = FontFamily.Monospace,
+            fontSize = 10.sp,
+            letterSpacing = 1.3.sp,
+            modifier = Modifier.fillMaxWidth().padding(top = 16.dp, bottom = 10.dp),
+            textAlign = androidx.compose.ui.text.style.TextAlign.Center
+        )
     }
 }
 
