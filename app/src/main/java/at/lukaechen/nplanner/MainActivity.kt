@@ -3809,8 +3809,91 @@ private fun ExerciseDetailDialog(
     }
 }
 
+private fun validatedMediaUrl(raw: String): Uri? = runCatching {
+    val uri = Uri.parse(raw.trim())
+    if (uri.scheme?.lowercase(Locale.ROOT) != "https" || uri.host.isNullOrBlank()) null else uri
+}.getOrNull()
+
+private fun youtubeVideoId(uri: Uri): String? {
+    val host = uri.host?.lowercase(Locale.ROOT)?.removePrefix("www.") ?: return null
+    val candidate = when (host) {
+        "youtu.be" -> uri.pathSegments.firstOrNull()
+        "youtube.com", "m.youtube.com", "music.youtube.com" -> when {
+            uri.path == "/watch" -> uri.getQueryParameter("v")
+            uri.pathSegments.firstOrNull() in listOf("shorts", "embed", "live") -> uri.pathSegments.getOrNull(1)
+            else -> null
+        }
+        else -> null
+    }
+    return candidate?.takeIf { it.matches(Regex("[A-Za-z0-9_-]{11}")) }
+}
+
+@Composable
+private fun ExternalMediaCard(uri: Uri, isVideo: Boolean) {
+    val context = LocalContext.current
+    val youtubeId = remember(uri) { youtubeVideoId(uri) }
+    val image = remember(uri) { mutableStateOf<androidx.compose.ui.graphics.ImageBitmap?>(null) }
+    LaunchedEffect(uri, isVideo) {
+        image.value = null
+        if (!isVideo && uri.toString().length <= 2048 &&
+            uri.path.orEmpty().lowercase(Locale.ROOT).endsWithAny(listOf(".jpg", ".jpeg", ".png", ".webp"))) {
+            image.value = kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) {
+                runCatching {
+                    val conn = (java.net.URL(uri.toString()).openConnection() as java.net.HttpURLConnection).apply {
+                        connectTimeout = 5000
+                        readTimeout = 5000
+                        instanceFollowRedirects = false
+                    }
+                    try {
+                        if (conn.responseCode !in 200..299 ||
+                            !conn.contentType.orEmpty().startsWith("image/") ||
+                            conn.contentLengthLong > 4_000_000L) null
+                        else {
+                            val bytes = conn.inputStream.use { input ->
+                                val output = java.io.ByteArrayOutputStream()
+                                val buffer = ByteArray(8192)
+                                var count = 0
+                                while (true) {
+                                    val read = input.read(buffer)
+                                    if (read < 0) break
+                                    count += read
+                                    if (count > 4_000_000) break
+                                    output.write(buffer, 0, read)
+                                }
+                                if (count > 4_000_000) null else output.toByteArray()
+                            }
+                            bytes?.let { android.graphics.BitmapFactory.decodeByteArray(it, 0, it.size)?.asImageBitmap() }
+                        }
+                    } finally { conn.disconnect() }
+                }.getOrNull()
+            }
+        }
+    }
+    Column(Modifier.fillMaxWidth().clip(RoundedCornerShape(18.dp)).background(Panel2).padding(12.dp)) {
+        val bitmap = image.value
+        if (bitmap != null) {
+            androidx.compose.foundation.Image(bitmap, "Externes Übungsbild", Modifier.fillMaxWidth().height(180.dp), contentScale = ContentScale.Fit)
+        } else {
+            Text(if (youtubeId != null) "▶  YOUTUBE-VIDEO" else if (isVideo) "▶  VIDEO-LINK" else "▧  BILD-LINK",
+                color = White, fontSize = 14.sp)
+        }
+        Spacer(Modifier.height(8.dp))
+        Text(uri.host.orEmpty(), color = Muted, fontSize = 11.sp)
+        TextButton(onClick = {
+            runCatching { context.startActivity(android.content.Intent(android.content.Intent.ACTION_VIEW, uri)) }
+        }) { Text(if (youtubeId != null) "In YouTube öffnen ↗" else "Extern öffnen ↗") }
+    }
+}
+
+private fun String.endsWithAny(suffixes: List<String>): Boolean = suffixes.any { endsWith(it) }
+
 @Composable
 private fun ExerciseMediaViewer(mediaPath: String, isVideo: Boolean) {
+    val external = remember(mediaPath) { validatedMediaUrl(mediaPath) }
+    if (external != null) {
+        ExternalMediaCard(external, isVideo)
+        return
+    }
     val file = remember(mediaPath) { File(mediaPath) }
     if (!file.exists()) return
 
@@ -3943,6 +4026,8 @@ private fun NewExerciseDialog(
     var targetReps by remember { mutableStateOf("10") }
     var targetSeconds by remember { mutableStateOf("45") }
     var copiedMediaPath by remember { mutableStateOf("") }
+    var mediaUrl by remember { mutableStateOf("") }
+    var mediaUrlIsVideo by remember { mutableStateOf(true) }
     var copiedMediaIsVideo by remember { mutableStateOf(false) }
 
     val mediaPicker = rememberLauncherForActivityResult(
@@ -4134,11 +4219,26 @@ private fun NewExerciseDialog(
                     }
                 }
 
+                Spacer(Modifier.height(12.dp))
+                OutlinedTextField(
+                    value = mediaUrl,
+                    onValueChange = { mediaUrl = it.take(2048) },
+                    label = { Text("Externer Medienlink (HTTPS)") },
+                    singleLine = true,
+                    modifier = Modifier.fillMaxWidth()
+                )
+                Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                    ChoiceChip("Video / YouTube", mediaUrlIsVideo, Modifier.weight(1f)) { mediaUrlIsVideo = true }
+                    ChoiceChip("Bild", !mediaUrlIsVideo, Modifier.weight(1f)) { mediaUrlIsVideo = false }
+                }
+                if (mediaUrl.isNotBlank() && validatedMediaUrl(mediaUrl) == null) {
+                    Text("Bitte einen gültigen HTTPS-Link eingeben.", color = Red, fontSize = 11.sp)
+                }
                 Spacer(Modifier.height(18.dp))
                 Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.End) {
                     TextButton(onClick = onDismiss) { Text("Abbrechen") }
                     TextButton(
-                        enabled = name.isNotBlank(),
+                        enabled = name.isNotBlank() && (mediaUrl.isBlank() || validatedMediaUrl(mediaUrl) != null),
                         onClick = {
                             onCreate(
                                 Exercise(
@@ -4149,8 +4249,8 @@ private fun NewExerciseDialog(
                                     secondaryMuscleIds = secondaryMuscles.toList(),
                                     kind = kind,
                                     description = description.trim(),
-                                    mediaPath = copiedMediaPath,
-                                    mediaIsVideo = copiedMediaIsVideo,
+                                    mediaPath = mediaUrl.takeIf { it.isNotBlank() }?.trim() ?: copiedMediaPath,
+                                    mediaIsVideo = if (mediaUrl.isNotBlank()) mediaUrlIsVideo else copiedMediaIsVideo,
                                     targetWeightKg = targetWeight.replace(',', '.').toFloatOrNull()?.coerceIn(0f, 500f) ?: 20f,
                                     targetReps = targetReps.toIntOrNull()?.coerceIn(1, 500) ?: 10,
                                     targetSeconds = targetSeconds.toIntOrNull()?.coerceIn(1, 3600) ?: 45
@@ -4809,7 +4909,7 @@ private fun SetupScreen(
         )
         HorizontalDivider(color = Color(0xFF242424), modifier = Modifier.padding(top = 6.dp))
         Text(
-            "NPLANNER · VERSION 0.25",
+            "NPLANNER · VERSION 0.28",
             color = Color(0xFFB6B6B6),
             fontFamily = FontFamily.Monospace,
             fontSize = 10.sp,
