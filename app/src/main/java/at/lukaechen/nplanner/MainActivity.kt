@@ -123,10 +123,55 @@ data class Rule(
     val optional: Boolean = false
 )
 
+private data class MuscleOption(val id: String, val label: String, val category: String)
+
+private val muscleCatalogue = listOf(
+    MuscleOption("chest", "Brust", "Brust"),
+    MuscleOption("back", "Rücken", "Rücken"),
+    MuscleOption("shoulders", "Schultern", "Schultern"),
+    MuscleOption("arms", "Arme", "Arme"),
+    MuscleOption("core", "Bauch & Core", "Bauch & Core"),
+    MuscleOption("legs", "Beine", "Beine"),
+    MuscleOption("glutes", "Gesäß", "Gesäß"),
+    MuscleOption("calves", "Waden", "Waden"),
+    MuscleOption("chest_upper", "Obere Brust", "Brust"),
+    MuscleOption("chest_middle", "Mittlere Brust", "Brust"),
+    MuscleOption("chest_lower", "Untere Brust", "Brust"),
+    MuscleOption("lats", "Latissimus", "Rücken"),
+    MuscleOption("traps", "Trapezmuskel", "Rücken"),
+    MuscleOption("rhomboids", "Rhomboiden", "Rücken"),
+    MuscleOption("lower_back", "Unterer Rücken", "Rücken"),
+    MuscleOption("front_delts", "Vordere Schulter", "Schultern"),
+    MuscleOption("side_delts", "Seitliche Schulter", "Schultern"),
+    MuscleOption("rear_delts", "Hintere Schulter", "Schultern"),
+    MuscleOption("biceps", "Bizeps", "Arme"),
+    MuscleOption("triceps", "Trizeps", "Arme"),
+    MuscleOption("brachialis", "Brachialis", "Arme"),
+    MuscleOption("forearms", "Unterarme", "Arme"),
+    MuscleOption("abs", "Gerader Bauchmuskel", "Bauch & Core"),
+    MuscleOption("obliques", "Seitliche Bauchmuskeln", "Bauch & Core"),
+    MuscleOption("deep_core", "Tiefe Bauchmuskulatur", "Bauch & Core"),
+    MuscleOption("quads", "Quadrizeps", "Beine"),
+    MuscleOption("hamstrings", "Beinbeuger", "Beine"),
+    MuscleOption("adductors", "Adduktoren", "Beine"),
+    MuscleOption("abductors", "Abduktoren", "Beine"),
+    MuscleOption("glutes_max", "Großer Gesäßmuskel", "Gesäß"),
+    MuscleOption("glutes_med", "Mittlerer Gesäßmuskel", "Gesäß"),
+    MuscleOption("glutes_min", "Kleiner Gesäßmuskel", "Gesäß"),
+    MuscleOption("gastrocnemius", "Gastrocnemius", "Waden"),
+    MuscleOption("soleus", "Soleus", "Waden"),
+    MuscleOption("neck", "Nackenmuskulatur", "Nacken"),
+    MuscleOption("full_body", "Ganzkörper", "Sonstiges")
+)
+
+private fun muscleName(id: String): String = muscleCatalogue.firstOrNull { it.id == id }?.label ?: id
+
 data class Exercise(
     val id: String,
     val name: String,
     val muscle: String = "Ganzkörper",
+    val primaryMuscleId: String = "",
+    val secondaryMuscleIds: List<String> = emptyList(),
     val kind: ExerciseKind = ExerciseKind.WEIGHT,
     val description: String = "",
     val steps: List<String> = emptyList(),
@@ -375,6 +420,10 @@ private fun parseNpefExercises(rawInput: String): Result<List<Exercise>> = runCa
             id = UUID.randomUUID().toString(),
             name = name.take(60),
             muscle = o.optString("muscle", "Ganzkörper").ifBlank { "Ganzkörper" }.take(32),
+            primaryMuscleId = o.optString("primaryMuscleId", ""),
+            secondaryMuscleIds = o.optJSONArray("secondaryMuscleIds")?.let { arr ->
+                (0 until arr.length()).mapNotNull { arr.optString(it).takeIf(String::isNotBlank) }
+            } ?: emptyList(),
             kind = kind,
             description = o.optString("description", "").trim().take(400),
             steps = stepsList,
@@ -392,6 +441,8 @@ private fun exportNpefJson(exercises: List<Exercise>): String {
             JSONObject()
                 .put("name", ex.name)
                 .put("muscle", ex.muscle)
+                    .put("primaryMuscleId", ex.primaryMuscleId)
+                    .put("secondaryMuscleIds", JSONArray(ex.secondaryMuscleIds))
                 .put("kind", ex.kind.name)
                 .put("description", ex.description)
                 .put("steps", JSONArray(ex.steps))
@@ -564,6 +615,10 @@ class MainActivity : ComponentActivity() {
                     id = o.getString("id"),
                     name = o.getString("name"),
                     muscle = o.optString("muscle", "Ganzkörper"),
+                    primaryMuscleId = o.optString("primaryMuscleId", ""),
+                    secondaryMuscleIds = o.optJSONArray("secondaryMuscleIds")?.let { arr ->
+                        (0 until arr.length()).mapNotNull { arr.optString(it).takeIf(String::isNotBlank) }
+                    } ?: emptyList(),
                     kind = runCatching { ExerciseKind.valueOf(o.optString("kind", "WEIGHT")) }.getOrDefault(ExerciseKind.WEIGHT),
                     description = o.optString("description", ""),
                     steps = steps,
@@ -585,6 +640,8 @@ class MainActivity : ComponentActivity() {
                     .put("id", ex.id)
                     .put("name", ex.name)
                     .put("muscle", ex.muscle)
+                    .put("primaryMuscleId", ex.primaryMuscleId)
+                    .put("secondaryMuscleIds", JSONArray(ex.secondaryMuscleIds))
                     .put("kind", ex.kind.name)
                     .put("description", ex.description)
                     .put("steps", JSONArray(ex.steps))
@@ -789,44 +846,43 @@ class MainActivity : ComponentActivity() {
 
         fun persistTodaySnapshot(d: LocalDate = date) {
             val snap = daySnapshot(d)
-            val obj = JSONObject()
-                .put("done", snap.done)
-                .put("total", snap.total)
+            val items = JSONArray()
+            snap.dailyRules.forEach { r ->
+                items.put(JSONArray().put(r.name).put(doneCount(r, d)).put(totalOf(r)).put(if (r.optional) 1 else 0))
+            }
+            snap.weeklyDoneRules.forEach { r ->
+                items.put(JSONArray().put("${r.name} (Wochenziel)").put(1).put(1).put(if (r.optional) 1 else 0))
+            }
+            val obj = JSONObject().put("done", snap.done).put("total", snap.total).put("items", items)
             prefs.edit().putString("snap:$d", obj.toString()).apply()
         }
 
-        fun preservePastSnapshotsBeforeRuleChange() {
-            // Old rules must still be present while reconstructing historical totals.
-            // Never overwrite snapshots already stored for a date.
+        fun freezeHistoryBeforeRuleChange() {
             val yesterday = date.minusDays(1)
-            val knownDates = mutableListOf<LocalDate>()
-            rules.mapNotNullTo(knownDates) { r ->
-                runCatching { LocalDate.parse(r.createdDate) }.getOrNull()
-            }
-            prefs.all.keys.forEach { key ->
-                val datePart = when {
-                    key.startsWith("snap:") -> key.removePrefix("snap:")
-                    key.startsWith("done:") || key.startsWith("cnt:") || key.startsWith("wk_day:") ->
-                        key.substringAfter(':').substringBefore(':')
-                    else -> null
-                }
-                datePart?.let { raw ->
-                    runCatching { LocalDate.parse(raw) }.getOrNull()?.let { knownDates.add(it) }
-                }
-            }
-            val first = knownDates.filter { !it.isAfter(yesterday) }.minOrNull() ?: return
-            // Bounded to ten years to avoid pathological preference data.
-            val earliest = maxOf(first, yesterday.minusYears(10))
-            val editor = prefs.edit()
-            var d = earliest
+            val dates = rules.mapNotNull { runCatching { LocalDate.parse(it.createdDate) }.getOrNull() }
+            val earliest = dates.minOrNull() ?: return
+            var d = maxOf(earliest, yesterday.minusYears(10))
             while (!d.isAfter(yesterday)) {
-                if (!prefs.contains("snap:$d")) {
-                    val snap = daySnapshot(d)
-                    editor.putString("snap:$d", JSONObject().put("done", snap.done).put("total", snap.total).toString())
+                val old = prefs.getString("snap:$d", null)
+                if (old == null) {
+                    persistTodaySnapshot(d)
+                } else {
+                    // Enrich old aggregate-only snapshots, preserving their original totals.
+                    val obj = runCatching { JSONObject(old) }.getOrNull()
+                    if (obj != null && !obj.has("items")) {
+                        val snap = daySnapshot(d)
+                        val items = JSONArray()
+                        snap.dailyRules.forEach { r ->
+                            items.put(JSONArray().put(r.name).put(doneCount(r, d)).put(totalOf(r)).put(if (r.optional) 1 else 0))
+                        }
+                        snap.weeklyDoneRules.forEach { r ->
+                            items.put(JSONArray().put("${r.name} (Wochenziel)").put(1).put(1).put(if (r.optional) 1 else 0))
+                        }
+                        prefs.edit().putString("snap:$d", obj.put("items", items).toString()).apply()
+                    }
                 }
                 d = d.plusDays(1)
             }
-            editor.apply()
         }
 
         fun readDaySnapshot(d: LocalDate): DaySnapshot {
@@ -838,7 +894,14 @@ class MainActivity : ComponentActivity() {
                     val o = JSONObject(raw)
                     val sDone = o.optInt("done", live.done)
                     val sTotal = o.optInt("total", live.total)
-                    live.copy(done = sDone, total = sTotal)
+                    val arr = o.optJSONArray("items")
+                    val items = if (arr == null) emptyList() else (0 until arr.length()).mapNotNull { i ->
+                        runCatching {
+                            val a = arr.getJSONArray(i)
+                            HistoricalTask(a.getString(0), a.getInt(1), a.getInt(2), a.optInt(3) == 1)
+                        }.getOrNull()
+                    }
+                    live.copy(done = sDone, total = sTotal, historicalTasks = items)
                 }.getOrNull()
                 if (parsed != null) return parsed
             }
@@ -933,7 +996,7 @@ class MainActivity : ComponentActivity() {
         }
 
         fun deleteRule(ruleId: String) {
-            preservePastSnapshotsBeforeRuleChange()
+            freezeHistoryBeforeRuleChange()
             rules = rules.filterNot { it.id == ruleId }
             saveRules(rules)
             persistTodaySnapshot(date)
@@ -945,6 +1008,7 @@ class MainActivity : ComponentActivity() {
         val scope = rememberCoroutineScope()
         var navTargetPage by remember { mutableIntStateOf(0) }
         var isNavAnimating by remember { mutableStateOf(false) }
+        val pageShift = remember { Animatable(0f) }
         val pageOpacity = remember { Animatable(1f) }
 
         fun selectPage(target: Int) {
@@ -954,11 +1018,16 @@ class MainActivity : ComponentActivity() {
                 isNavAnimating = true
                 scope.launch {
                     try {
-                        // Direct jump, no intermediate pages rendered during distant tab changes.
-                        pageOpacity.animateTo(0.15f, tween(durationMillis = 110))
+                        val direction = if (target > pagerState.currentPage) -1f else 1f
+                        // Swipe-like slide without exposing any intermediate tabs.
+                        pageShift.animateTo(direction * 90f, tween(130, easing = FastOutSlowInEasing))
+                        pageOpacity.animateTo(0.12f, tween(80))
                         pagerState.scrollToPage(target)
-                        pageOpacity.animateTo(1f, tween(durationMillis = 230, easing = FastOutSlowInEasing))
+                        pageShift.snapTo(-direction * 90f)
+                        pageShift.animateTo(0f, tween(230, easing = FastOutSlowInEasing))
+                        pageOpacity.animateTo(1f, tween(100))
                     } finally {
+                        pageShift.snapTo(0f)
                         pageOpacity.snapTo(1f)
                         isNavAnimating = false
                     }
@@ -978,7 +1047,10 @@ class MainActivity : ComponentActivity() {
                     state = pagerState,
                     beyondViewportPageCount = 1,
                     userScrollEnabled = !isNavAnimating,
-                    modifier = Modifier.fillMaxSize().graphicsLayer { alpha = pageOpacity.value }
+                    modifier = Modifier.fillMaxSize().graphicsLayer {
+                        translationX = pageShift.value
+                        alpha = pageOpacity.value
+                    }
                 ) { p ->
                     when (p) {
                         0 -> TodayScreen(
@@ -1133,7 +1205,7 @@ class MainActivity : ComponentActivity() {
                 ndot = ndot,
                 onDismiss = { addDialog = false },
                 onCreate = { rule ->
-                    preservePastSnapshotsBeforeRuleChange()
+                    freezeHistoryBeforeRuleChange()
                     rules = rules + rule.copy(createdDate = date.toString())
                     saveRules(rules)
                     persistTodaySnapshot(date)
@@ -1145,12 +1217,15 @@ class MainActivity : ComponentActivity() {
     }
 }
 
+private data class HistoricalTask(val name: String, val done: Int, val target: Int, val optional: Boolean)
+
 private data class DaySnapshot(
     val date: LocalDate,
     val done: Int,
     val total: Int,
     val dailyRules: List<Rule>,
-    val weeklyDoneRules: List<Rule>
+    val weeklyDoneRules: List<Rule>,
+    val historicalTasks: List<HistoricalTask> = emptyList()
 ) {
     val state: DayCompletionState
         get() = when {
@@ -2349,7 +2424,22 @@ private fun DayDetailCard(
                 DisplayCount(snap.done, snap.total, ndot, 28.sp)
             }
 
-            if (snap.dailyRules.isNotEmpty() || snap.weeklyDoneRules.isNotEmpty()) {
+            if (snap.historicalTasks.isNotEmpty()) {
+                HorizontalDivider(color = Color(0xFF282828), modifier = Modifier.padding(vertical = 12.dp))
+                Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                    snap.historicalTasks.forEach { item ->
+                        val isDone = item.done >= item.target
+                        Row(verticalAlignment = Alignment.CenterVertically) {
+                            Box(Modifier.size(7.dp).background(if (isDone) Red else Color(0xFF333333), CircleShape))
+                            Spacer(Modifier.width(10.dp))
+                            Text(item.name + if (item.optional) " (Optional)" else "", color = if (isDone) White else Muted,
+                                fontSize = 13.sp, modifier = Modifier.weight(1f))
+                            Text(if (isDone) "✓" else "${item.done}/${item.target}",
+                                color = if (isDone) Red else Muted, fontSize = 12.sp)
+                        }
+                    }
+                }
+            } else if (snap.dailyRules.isNotEmpty() || snap.weeklyDoneRules.isNotEmpty()) {
                 HorizontalDivider(color = Color(0xFF282828), modifier = Modifier.padding(vertical = 12.dp))
                 Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
                     snap.dailyRules.forEach { r ->
@@ -2400,16 +2490,18 @@ private fun suggestWorkoutName(existing: List<Workout>, selectedExercises: List<
     val now = java.time.LocalDateTime.now()
     val day = listOf("Montag", "Dienstag", "Mittwoch", "Donnerstag", "Freitag", "Samstag", "Sonntag")[now.dayOfWeek.value - 1]
     val time = when (now.hour) {
-        in 5..10 -> "Morgens"
-        in 11..16 -> "Nachmittags"
+        in 5..9 -> "Morgens"
+        in 10..11 -> "Vormittags"
+        12 -> "Mittags"
+        in 13..16 -> "Nachmittags"
         else -> "Abends"
     }
     val base = "Workout • $day $time"
     val used = existing.map { it.name.trim() }.toSet()
     if (base !in used) return base
-    var index = 2
-    while ("$base ($index)" in used) index++
-    return "$base ($index)"
+    var number = 2
+    while ("$base ($number)" in used) number++
+    return "$base ($number)"
 }
 
 private fun bestRecordText(ex: Exercise, logs: List<ExerciseLog>): Pair<String, String>? {
@@ -3617,6 +3709,77 @@ private fun ExerciseMediaViewer(mediaPath: String, isVideo: Boolean) {
 }
 
 @Composable
+private fun MusclePickerDialog(
+    primary: String,
+    secondary: Set<String>,
+    onDismiss: () -> Unit,
+    onApply: (String, List<String>) -> Unit
+) {
+    var search by remember { mutableStateOf("") }
+    var selectedPrimary by remember { mutableStateOf(primary) }
+    val selectedSecondary = remember { mutableStateListOf<String>().apply { addAll(secondary) } }
+    var selectingSecondary by remember { mutableStateOf(false) }
+    Dialog(onDismissRequest = onDismiss, properties = DialogProperties(usePlatformDefaultWidth = false)) {
+        Surface(
+            modifier = Modifier.fillMaxWidth().padding(16.dp),
+            color = Panel,
+            shape = RoundedCornerShape(26.dp)
+        ) {
+            Column(Modifier.padding(18.dp)) {
+                Text("MUSKELGRUPPEN", color = White, fontSize = 20.sp)
+                Spacer(Modifier.height(10.dp))
+                OutlinedTextField(
+                    value = search,
+                    onValueChange = { search = it.take(50) },
+                    label = { Text("Muskelgruppe suchen") },
+                    singleLine = true,
+                    modifier = Modifier.fillMaxWidth()
+                )
+                Spacer(Modifier.height(10.dp))
+                Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                    ChoiceChip("Hauptmuskel", !selectingSecondary, Modifier.weight(1f)) { selectingSecondary = false }
+                    ChoiceChip("Weitere Muskeln", selectingSecondary, Modifier.weight(1f)) { selectingSecondary = true }
+                }
+                Spacer(Modifier.height(8.dp))
+                Column(Modifier.heightIn(max = 370.dp).verticalScroll(rememberScrollState())) {
+                    val filtered = muscleCatalogue.filter {
+                        it.label.contains(search, ignoreCase = true) || it.category.contains(search, ignoreCase = true)
+                    }
+                    filtered.groupBy { it.category }.forEach { (category, entries) ->
+                        Text(category.uppercase(Locale.GERMAN), color = Muted, fontSize = 11.sp,
+                            modifier = Modifier.padding(top = 10.dp, bottom = 4.dp))
+                        entries.forEach { option ->
+                            val selected = if (selectingSecondary) option.id in selectedSecondary else option.id == selectedPrimary
+                            Row(
+                                Modifier.fillMaxWidth().clickable {
+                                    if (selectingSecondary) {
+                                        if (option.id != selectedPrimary) {
+                                            if (selected) selectedSecondary.remove(option.id) else selectedSecondary.add(option.id)
+                                        }
+                                    } else {
+                                        selectedPrimary = option.id
+                                        selectedSecondary.remove(option.id)
+                                    }
+                                }.padding(vertical = 10.dp),
+                                verticalAlignment = Alignment.CenterVertically
+                            ) {
+                                Text(if (selected) "●" else "○", color = if (selected) Red else Muted, fontSize = 18.sp)
+                                Spacer(Modifier.width(12.dp))
+                                Text(option.label, color = White, fontSize = 14.sp)
+                            }
+                        }
+                    }
+                }
+                Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.End) {
+                    TextButton(onClick = onDismiss) { Text("Abbrechen") }
+                    TextButton(onClick = { onApply(selectedPrimary, selectedSecondary.toList()) }) { Text("Übernehmen") }
+                }
+            }
+        }
+    }
+}
+
+@Composable
 private fun NewExerciseDialog(
     ndot: FontFamily,
     targetWorkoutName: String?,
@@ -3626,7 +3789,9 @@ private fun NewExerciseDialog(
     val context = LocalContext.current
     val haptic = LocalHapticFeedback.current
     var name by remember { mutableStateOf("") }
-    var muscle by remember { mutableStateOf("Brust") }
+    var primaryMuscleId by remember { mutableStateOf("chest") }
+    val secondaryMuscles = remember { mutableStateListOf<String>() }
+    var musclePickerOpen by remember { mutableStateOf(false) }
     var kind by remember { mutableStateOf(ExerciseKind.WEIGHT) }
     var description by remember { mutableStateOf("") }
     var targetWeight by remember { mutableStateOf("40") }
@@ -3681,13 +3846,20 @@ private fun NewExerciseDialog(
                     modifier = Modifier.fillMaxWidth()
                 )
                 Spacer(Modifier.height(10.dp))
-                OutlinedTextField(
-                    value = muscle,
-                    onValueChange = { muscle = it.take(32) },
-                    label = { Text("Muskelgruppe (z. B. Brust, Rücken)") },
-                    singleLine = true,
-                    modifier = Modifier.fillMaxWidth()
-                )
+                Surface(
+                    modifier = Modifier.fillMaxWidth().clickable { musclePickerOpen = true },
+                    color = Panel2,
+                    shape = RoundedCornerShape(16.dp)
+                ) {
+                    Column(Modifier.padding(14.dp)) {
+                        Text("MUSKELGRUPPEN AUSWÄHLEN  ›", color = White, fontSize = 12.sp)
+                        Spacer(Modifier.height(5.dp))
+                        Text("Hauptmuskel: ${muscleName(primaryMuscleId)}", color = White, fontSize = 14.sp)
+                        if (secondaryMuscles.isNotEmpty()) {
+                            Text("Weitere: ${secondaryMuscles.joinToString(", ") { muscleName(it) }}", color = Muted, fontSize = 11.sp)
+                        }
+                    }
+                }
 
                 SectionLabel("ÜBUNGSTYP", topPadding = 16.dp, bottomPadding = 8.dp)
                 Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
@@ -3795,7 +3967,9 @@ private fun NewExerciseDialog(
                                 Exercise(
                                     id = UUID.randomUUID().toString(),
                                     name = name.trim(),
-                                    muscle = muscle.trim().ifBlank { "Ganzkörper" },
+                                    muscle = muscleCatalogue.firstOrNull { it.id == primaryMuscleId }?.category ?: "Ganzkörper",
+                                    primaryMuscleId = primaryMuscleId,
+                                    secondaryMuscleIds = secondaryMuscles.toList(),
                                     kind = kind,
                                     description = description.trim(),
                                     mediaPath = copiedMediaPath,
@@ -3811,6 +3985,20 @@ private fun NewExerciseDialog(
             }
         }
     }
+    if (musclePickerOpen) {
+        MusclePickerDialog(
+            primary = primaryMuscleId,
+            secondary = secondaryMuscles.toSet(),
+            onDismiss = { musclePickerOpen = false },
+            onApply = { primary, secondary ->
+                primaryMuscleId = primary
+                secondaryMuscles.clear()
+                secondaryMuscles.addAll(secondary.filter { it != primary })
+                musclePickerOpen = false
+            }
+        )
+    }
+
 }
 
 @Composable
@@ -4444,7 +4632,7 @@ private fun SetupScreen(
         )
         HorizontalDivider(color = Color(0xFF242424), modifier = Modifier.padding(top = 6.dp))
         Text(
-            "NPLANNER · VERSION 0.22",
+            "NPLANNER · VERSION 0.24",
             color = Color(0xFFB6B6B6),
             fontFamily = FontFamily.Monospace,
             fontSize = 10.sp,
