@@ -1048,11 +1048,10 @@ class MainActivity : ComponentActivity() {
             overlayPage = pagerState.currentPage
             directTarget = target
             scope.launch {
-                // Allow the outgoing page to enter composition before changing target.
-                androidx.compose.runtime.withFrameNanos { }
+                // Switch target on the next composition without an extra frame of waiting.
                 overlayPage = target
                 pagerState.scrollToPage(target)
-                delay(300)
+                delay(190)
                 directTarget = null
                 directSwitching = false
             }
@@ -1218,10 +1217,10 @@ class MainActivity : ComponentActivity() {
                         modifier = Modifier.fillMaxSize().background(Bg),
                         transitionSpec = {
                             val forward = targetState > initialState
-                            val enter = slideInHorizontally(tween(260, easing = FastOutSlowInEasing)) {
+                            val enter = slideInHorizontally(tween(180, easing = FastOutSlowInEasing)) {
                                 if (forward) it else -it
                             }
-                            val exit = slideOutHorizontally(tween(260, easing = FastOutSlowInEasing)) {
+                            val exit = slideOutHorizontally(tween(180, easing = FastOutSlowInEasing)) {
                                 if (forward) -it else it
                             }
                             enter togetherWith exit
@@ -3531,6 +3530,24 @@ private fun WorkoutSheetDialog(
     }
 }
 
+private data class WorkoutPreset(
+    val title: String,
+    val kind: WorkoutKind,
+    val minutes: Int,
+    val exerciseNames: List<String>,
+    val description: String
+)
+
+private val workoutPresets = listOf(
+    WorkoutPreset("Cindy", WorkoutKind.AMRAP, 20,
+        listOf("Klimmzüge", "Liegestütze", "Kniebeugen"),
+        "Pro Runde: 5 Klimmzüge, 10 Liegestütze, 15 Kniebeugen."),
+    WorkoutPreset("Ganzkörper", WorkoutKind.CLASSIC, 0,
+        listOf("Kniebeugen", "Liegestütze", "Rudern"), "Ganzkörpertraining"),
+    WorkoutPreset("Cardio-Mix", WorkoutKind.CLASSIC, 0,
+        listOf("Laufen", "Rudern", "Radfahren"), "Ausdauertraining")
+)
+
 @Composable
 private fun WorkoutEditorDialog(
     ndot: FontFamily,
@@ -3554,6 +3571,9 @@ private fun WorkoutEditorDialog(
     var workoutKind by remember { mutableStateOf(initialKind) }
     var durationText by remember { mutableStateOf((initialDurationSeconds / 60).takeIf { it > 0 }?.toString() ?: "20") }
     var selectedIds by remember { mutableStateOf(initialSelectedIds) }
+    var showPresetPicker by remember { mutableStateOf(false) }
+    var showExercisePicker by remember { mutableStateOf(false) }
+    var presetNotice by remember { mutableStateOf("") }
 
     // Wenn noch kein eigener Name eingegeben wurde, passt sich der Vorschlag an die gewaehlten Uebungen an
     LaunchedEffect(selectedIds) {
@@ -3609,54 +3629,30 @@ private fun WorkoutEditorDialog(
                         keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
                         modifier = Modifier.fillMaxWidth().padding(top = 8.dp))
                 }
-                if (isNew && workoutKind == WorkoutKind.AMRAP) {
-                    TextButton(onClick = {
-                        name = "Cindy"
-                        note = "20 Minuten AMRAP: 5 Klimmzüge, 10 Liegestütze, 15 Kniebeugen pro Runde."
-                        durationText = "20"
-                        nameManuallyEdited = true
-                    }) { Text("Cindy-Vorlage übernehmen", color = White) }
-                }
-                if (allExercises.isNotEmpty()) {
-                    SectionLabel("ÜBUNGEN IM WORKOUT (${selectedIds.size})", topPadding = 18.dp, bottomPadding = 8.dp)
-                    Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
-                        allExercises.forEach { ex ->
-                            val included = ex.id in selectedIds
-                            Surface(
-                                color = if (included) Panel2 else Color(0xFF121212),
-                                shape = RoundedCornerShape(16.dp),
-                                modifier = Modifier
-                                    .fillMaxWidth()
-                                    .clickable {
-                                        selectedIds = if (included) selectedIds - ex.id else selectedIds + ex.id
-                                        triggerHaptic(context, haptic, HapticStyle.TICK)
-                                    }
-                            ) {
-                                Row(
-                                    Modifier.padding(horizontal = 14.dp, vertical = 11.dp),
-                                    verticalAlignment = Alignment.CenterVertically
-                                ) {
-                                    Box(
-                                        Modifier
-                                            .size(22.dp)
-                                            .clip(CircleShape)
-                                            .background(if (included) Red else Panel2),
-                                        contentAlignment = Alignment.Center
-                                    ) {
-                                        if (included) {
-                                            Text("✓", color = White, fontSize = 12.sp, fontWeight = FontWeight.Bold)
-                                        }
-                                    }
-                                    Spacer(Modifier.width(12.dp))
-                                    Column(Modifier.weight(1f)) {
-                                        Text(ex.name, color = if (included) White else Muted, fontSize = 14.sp)
-                                        Text(exerciseSummary(ex), color = Muted, fontSize = 10.sp)
-                                    }
-                                }
-                            }
-                        }
+                Spacer(Modifier.height(10.dp))
+                Surface(
+                    color = Panel2,
+                    shape = RoundedCornerShape(16.dp),
+                    modifier = Modifier.fillMaxWidth().clickable { showPresetPicker = true }
+                ) {
+                    Row(Modifier.padding(16.dp), verticalAlignment = Alignment.CenterVertically) {
+                        Text("WORKOUT-VORLAGE WÄHLEN", color = White, fontSize = 12.sp, modifier = Modifier.weight(1f))
+                        Text("›", color = Muted)
                     }
                 }
+                Spacer(Modifier.height(8.dp))
+                Surface(
+                    color = Panel2,
+                    shape = RoundedCornerShape(16.dp),
+                    modifier = Modifier.fillMaxWidth().clickable { showExercisePicker = true }
+                ) {
+                    Row(Modifier.padding(16.dp), verticalAlignment = Alignment.CenterVertically) {
+                        Text("ÜBUNGEN AUSWÄHLEN", color = White, fontSize = 12.sp, modifier = Modifier.weight(1f))
+                        Text("${selectedIds.size}  ›", color = Muted)
+                    }
+                }
+                if (presetNotice.isNotBlank()) Text(presetNotice, color = Muted, fontSize = 11.sp,
+                    modifier = Modifier.padding(top = 8.dp))
 
                 Spacer(Modifier.height(18.dp))
                 Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.End) {
@@ -3677,6 +3673,64 @@ private fun WorkoutEditorDialog(
             }
         }
     }
+    if (showPresetPicker) {
+        AlertDialog(
+            onDismissRequest = { showPresetPicker = false },
+            title = { Text("WORKOUT-VORLAGEN", color = White) },
+            text = {
+                Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                    workoutPresets.forEach { preset ->
+                        Surface(color = Panel2, shape = RoundedCornerShape(15.dp),
+                            modifier = Modifier.fillMaxWidth().clickable {
+                                workoutKind = preset.kind
+                                durationText = (preset.minutes.takeIf { it > 0 } ?: 20).toString()
+                                name = preset.title
+                                nameManuallyEdited = true
+                                note = preset.description
+                                val matches = allExercises.filter { ex ->
+                                    preset.exerciseNames.any { n -> ex.name.equals(n, ignoreCase = true) }
+                                }.map { it.id }
+                                selectedIds = matches.toSet()
+                                val missing = preset.exerciseNames.size - matches.size
+                                presetNotice = if (missing > 0) "$missing Übung(en) fehlen noch in deiner Bibliothek. Bitte ergänzen." else "${matches.size} Übungen übernommen."
+                                showPresetPicker = false
+                            }) {
+                            Column(Modifier.padding(13.dp)) {
+                                Text(preset.title, color = White, fontSize = 15.sp)
+                                Text("${preset.kind.name} · ${preset.exerciseNames.joinToString(", ")}", color = Muted, fontSize = 10.sp)
+                            }
+                        }
+                    }
+                }
+            },
+            confirmButton = { TextButton(onClick = { showPresetPicker = false }) { Text("Schließen") } },
+            containerColor = Panel
+        )
+    }
+    if (showExercisePicker) {
+        AlertDialog(
+            onDismissRequest = { showExercisePicker = false },
+            title = { Text("ÜBUNGEN AUSWÄHLEN", color = White) },
+            text = {
+                Column(Modifier.heightIn(max = 400.dp).verticalScroll(rememberScrollState()),
+                    verticalArrangement = Arrangement.spacedBy(6.dp)) {
+                    allExercises.forEach { ex ->
+                        val included = ex.id in selectedIds
+                        Row(Modifier.fillMaxWidth().clickable {
+                            selectedIds = if (included) selectedIds - ex.id else selectedIds + ex.id
+                        }.padding(vertical = 10.dp), verticalAlignment = Alignment.CenterVertically) {
+                            Text(if (included) "✓" else "○", color = if (included) Red else Muted, fontSize = 18.sp)
+                            Spacer(Modifier.width(12.dp))
+                            Text(ex.name, color = White, fontSize = 14.sp)
+                        }
+                    }
+                }
+            },
+            confirmButton = { TextButton(onClick = { showExercisePicker = false }) { Text("Übernehmen") } },
+            containerColor = Panel
+        )
+    }
+
 }
 
 @Composable
@@ -5019,7 +5073,7 @@ private fun SetupScreen(
         )
         HorizontalDivider(color = Color(0xFF242424), modifier = Modifier.padding(top = 6.dp))
         Text(
-            "NPLANNER · VERSION 0.29",
+            "NPLANNER · VERSION 0.30",
             color = Color(0xFFB6B6B6),
             fontFamily = FontFamily.Monospace,
             fontSize = 10.sp,
