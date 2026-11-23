@@ -50,12 +50,12 @@ internal object NPlannerAppearance {
         val next = if (dark) darkPalette else lightPalette
         if (palette != next) palette = next
     }
-    fun setMode(value: String) {
+    fun updateMode(value: String) {
         if (value !in listOf("auto", "light", "dark")) return
         context.getSharedPreferences("nplanner-v2", Context.MODE_PRIVATE).edit().putString("appearance_mode_v43", value).apply()
         mode = value
     }
-    fun setLanguage(value: String) {
+    fun updateLanguage(value: String) {
         if (value !in listOf("de", "en")) return
         context.getSharedPreferences("nplanner-v2", Context.MODE_PRIVATE).edit().putString("app_language_v43", value).apply()
         language = value
@@ -97,7 +97,7 @@ internal fun NPlannerAppearanceSettings() {
             Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                 listOf("light" to npString(R.string.np_ed10fe113de1), "dark" to npString(R.string.np_ec4616f89869), "auto" to npString(R.string.np_c614ba7c453c)).forEach { (value, label) ->
                     FilterChip(selected = NPlannerAppearance.mode == value,
-                        onClick = { NPlannerAppearance.setMode(value) },
+                        onClick = { NPlannerAppearance.updateMode(value) },
                         label = { Text(label, fontSize = 12.sp) }, modifier = Modifier.weight(1f))
                 }
             }
@@ -109,7 +109,7 @@ internal fun NPlannerAppearanceSettings() {
             Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                 listOf("de" to npString(R.string.np_a6a7709266d3), "en" to npString(R.string.np_649df08a448e)).forEach { (value, label) ->
                     FilterChip(selected = NPlannerAppearance.language == value,
-                        onClick = { NPlannerAppearance.setLanguage(value) },
+                        onClick = { NPlannerAppearance.updateLanguage(value) },
                         label = { Text(label, fontSize = 12.sp) }, modifier = Modifier.weight(1f))
                 }
             }
