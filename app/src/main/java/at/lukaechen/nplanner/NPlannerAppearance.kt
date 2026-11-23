@@ -1,5 +1,12 @@
 package at.lukaechen.nplanner
 
+import androidx.compose.foundation.selection.selectable
+import androidx.compose.foundation.selection.selectableGroup
+import androidx.compose.ui.Alignment
+import androidx.compose.ui.semantics.Role
+import androidx.compose.ui.text.font.FontFamily
+import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.style.TextOverflow
 import android.content.Context
 import android.content.res.Configuration
 import android.content.res.Resources
@@ -85,32 +92,100 @@ internal fun npNeutral(argb: Long): Color {
     return Color(a or (inverted shl 16) or (inverted shl 8) or inverted)
 }
 
+/** Same neutral, rounded selection surfaces as the existing heading/progress settings. */
+@Composable
+private fun AppearanceChoice(
+    label: String,
+    selected: Boolean,
+    modifier: Modifier = Modifier,
+    onClick: () -> Unit
+) {
+    val palette = NPlannerAppearance.palette
+    Surface(
+        modifier = modifier.selectable(selected = selected, role = Role.RadioButton, onClick = onClick),
+        color = if (selected) palette.foreground else palette.panel2,
+        contentColor = if (selected) palette.background else palette.foreground,
+        shape = RoundedCornerShape(16.dp),
+        tonalElevation = 0.dp,
+        shadowElevation = 0.dp
+    ) {
+        Box(
+            Modifier.heightIn(min = 48.dp).padding(horizontal = 8.dp, vertical = 10.dp),
+            contentAlignment = Alignment.Center
+        ) {
+            Text(
+                text = label,
+                color = if (selected) palette.background else palette.foreground,
+                fontFamily = FontFamily.Default,
+                fontSize = 12.sp,
+                fontWeight = if (selected) FontWeight.Medium else FontWeight.Normal,
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis
+            )
+        }
+    }
+}
+
 @Composable
 internal fun NPlannerAppearanceSettings() {
     val palette = NPlannerAppearance.palette
-    Surface(color = palette.panel, shape = RoundedCornerShape(22.dp), modifier = Modifier.fillMaxWidth()) {
-        Column(Modifier.padding(16.dp)) {
-            Text(npString(R.string.np_bb7394e2373e), color = palette.foreground, fontSize = 16.sp)
-            Text(npString(R.string.np_dfd8aad6150a),
-                color = palette.muted, fontSize = 11.sp)
-            Spacer(Modifier.height(12.dp))
-            Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                listOf("light" to npString(R.string.np_ed10fe113de1), "dark" to npString(R.string.np_ec4616f89869), "auto" to npString(R.string.np_c614ba7c453c)).forEach { (value, label) ->
-                    FilterChip(selected = NPlannerAppearance.mode == value,
-                        onClick = { NPlannerAppearance.updateMode(value) },
-                        label = { Text(label, fontSize = 12.sp) }, modifier = Modifier.weight(1f))
+    Column(Modifier.fillMaxWidth(), verticalArrangement = Arrangement.spacedBy(10.dp)) {
+        Surface(
+            color = palette.panel,
+            shape = RoundedCornerShape(22.dp),
+            tonalElevation = 0.dp,
+            shadowElevation = 0.dp,
+            modifier = Modifier.fillMaxWidth()
+        ) {
+            Column(Modifier.padding(16.dp)) {
+                Text(npString(R.string.np_bb7394e2373e), color = palette.foreground,
+                    fontFamily = FontFamily.Default, fontWeight = FontWeight.Medium, fontSize = 16.sp)
+                Spacer(Modifier.height(4.dp))
+                Text(npString(R.string.np_dfd8aad6150a), color = palette.muted,
+                    fontFamily = FontFamily.Default, fontSize = 11.sp, lineHeight = 16.sp)
+                Spacer(Modifier.height(12.dp))
+                Row(
+                    Modifier.fillMaxWidth().selectableGroup(),
+                    horizontalArrangement = Arrangement.spacedBy(8.dp)
+                ) {
+                    listOf(
+                        "light" to npString(R.string.np_ed10fe113de1),
+                        "dark" to npString(R.string.np_ec4616f89869),
+                        "auto" to npString(R.string.np_c614ba7c453c)
+                    ).forEach { (value, label) ->
+                        AppearanceChoice(label, NPlannerAppearance.mode == value, Modifier.weight(1f)) {
+                            NPlannerAppearance.updateMode(value)
+                        }
+                    }
                 }
             }
-            Spacer(Modifier.height(14.dp))
-            HorizontalDivider(color = palette.muted.copy(alpha = .2f))
-            Spacer(Modifier.height(14.dp))
-            Text(npString(R.string.np_b28f6f150a0f), color = palette.foreground, fontSize = 16.sp)
-            Text(npString(R.string.np_834bc9df07a7), color = palette.muted, fontSize = 11.sp)
-            Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                listOf("de" to npString(R.string.np_a6a7709266d3), "en" to npString(R.string.np_649df08a448e)).forEach { (value, label) ->
-                    FilterChip(selected = NPlannerAppearance.language == value,
-                        onClick = { NPlannerAppearance.updateLanguage(value) },
-                        label = { Text(label, fontSize = 12.sp) }, modifier = Modifier.weight(1f))
+        }
+        Surface(
+            color = palette.panel,
+            shape = RoundedCornerShape(22.dp),
+            tonalElevation = 0.dp,
+            shadowElevation = 0.dp,
+            modifier = Modifier.fillMaxWidth()
+        ) {
+            Column(Modifier.padding(16.dp)) {
+                Text(npString(R.string.np_b28f6f150a0f), color = palette.foreground,
+                    fontFamily = FontFamily.Default, fontWeight = FontWeight.Medium, fontSize = 16.sp)
+                Spacer(Modifier.height(4.dp))
+                Text(npString(R.string.np_834bc9df07a7), color = palette.muted,
+                    fontFamily = FontFamily.Default, fontSize = 11.sp, lineHeight = 16.sp)
+                Spacer(Modifier.height(12.dp))
+                Row(
+                    Modifier.fillMaxWidth().selectableGroup(),
+                    horizontalArrangement = Arrangement.spacedBy(8.dp)
+                ) {
+                    listOf(
+                        "de" to npString(R.string.np_a6a7709266d3),
+                        "en" to npString(R.string.np_649df08a448e)
+                    ).forEach { (value, label) ->
+                        AppearanceChoice(label, NPlannerAppearance.language == value, Modifier.weight(1f)) {
+                            NPlannerAppearance.updateLanguage(value)
+                        }
+                    }
                 }
             }
         }
