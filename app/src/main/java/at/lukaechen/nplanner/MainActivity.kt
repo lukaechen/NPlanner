@@ -2622,39 +2622,65 @@ private fun bestRecordText(ex: Exercise, logs: List<ExerciseLog>): Pair<String, 
 
 @Composable
 private fun ExerciseKindIcon(kind: ExerciseKind) {
-    Canvas(Modifier.size(27.dp)) {
-        val stroke = 2.dp.toPx()
-        fun line(x1: Float, y1: Float, x2: Float, y2: Float) =
-            drawLine(White, Offset(size.width*x1, size.height*y1), Offset(size.width*x2, size.height*y2), stroke, StrokeCap.Round)
+    Canvas(Modifier.size(28.dp)) {
+        val stroke = 1.9.dp.toPx()
+        val w = size.width; val h = size.height
+        fun line(x: Float, y: Float, xx: Float, yy: Float) =
+            drawLine(White, Offset(w*x, h*y), Offset(w*xx, h*yy), stroke, StrokeCap.Round)
+        fun ring(x: Float, y: Float, r: Float) =
+            drawCircle(White, w*r, Offset(w*x,h*y), style = Stroke(stroke))
         when (kind) {
             ExerciseKind.WEIGHT -> {
-                line(.25f,.5f,.75f,.5f)
-                listOf(.17f,.30f,.70f,.83f).forEach { x -> line(x,.29f,x,.71f) }
+                // Balanced dumbbell silhouette, double weight plates on each side.
+                line(.24f,.50f,.76f,.50f)
+                listOf(.15f,.29f,.71f,.85f).forEach { x ->
+                    val longPlate = x == .29f || x == .71f
+                    line(x, if (longPlate) .25f else .35f, x, if (longPlate) .75f else .65f)
+                }
+                line(.12f,.40f,.12f,.60f); line(.88f,.40f,.88f,.60f)
             }
             ExerciseKind.BODYWEIGHT -> {
-                drawCircle(White, size.width*.09f, Offset(size.width*.5f,size.height*.19f))
-                line(.5f,.3f,.5f,.62f); line(.5f,.4f,.24f,.56f); line(.5f,.4f,.76f,.56f)
-                line(.5f,.62f,.29f,.88f); line(.5f,.62f,.71f,.88f)
+                // Person in a plank/push-up position.
+                ring(.72f,.27f,.10f)
+                line(.62f,.35f,.40f,.47f)
+                line(.40f,.47f,.18f,.52f)
+                line(.46f,.46f,.55f,.72f)
+                line(.55f,.72f,.69f,.75f)
+                line(.20f,.52f,.16f,.73f)
+                line(.10f,.77f,.82f,.77f)
             }
             ExerciseKind.TIMED -> {
-                drawCircle(White,size.width*.31f,Offset(size.width*.5f,size.height*.55f),style=Stroke(stroke))
-                line(.5f,.55f,.5f,.35f); line(.5f,.55f,.64f,.64f); line(.4f,.13f,.6f,.13f)
-                line(.5f,.13f,.5f,.23f)
+                // Stopwatch with crown and hands.
+                ring(.50f,.55f,.31f)
+                line(.50f,.55f,.50f,.34f)
+                line(.50f,.55f,.64f,.62f)
+                line(.39f,.12f,.61f,.12f)
+                line(.50f,.12f,.50f,.22f)
+                line(.73f,.26f,.83f,.17f)
             }
             ExerciseKind.CARDIO -> {
-                val path = Path().apply {
-                    moveTo(size.width*.10f,size.height*.55f)
-                    lineTo(size.width*.31f,size.height*.55f)
-                    lineTo(size.width*.40f,size.height*.31f)
-                    lineTo(size.width*.53f,size.height*.77f)
-                    lineTo(size.width*.64f,size.height*.49f)
-                    lineTo(size.width*.90f,size.height*.49f)
+                // Rounded heart outline with a pulse inside.
+                val heart = Path().apply {
+                    moveTo(w*.50f,h*.83f)
+                    cubicTo(w*.35f,h*.70f,w*.12f,h*.52f,w*.16f,h*.34f)
+                    cubicTo(w*.20f,h*.12f,w*.42f,h*.14f,w*.50f,h*.30f)
+                    cubicTo(w*.61f,h*.11f,w*.81f,h*.15f,w*.85f,h*.34f)
+                    cubicTo(w*.89f,h*.52f,w*.65f,h*.73f,w*.50f,h*.83f)
                 }
-                drawPath(path, White, style=Stroke(stroke,cap=StrokeCap.Round,join=StrokeJoin.Round))
+                drawPath(heart, White, style = Stroke(stroke, cap = StrokeCap.Round, join = StrokeJoin.Round))
+                val pulse = Path().apply {
+                    moveTo(w*.24f,h*.49f); lineTo(w*.39f,h*.49f)
+                    lineTo(w*.45f,h*.39f); lineTo(w*.53f,h*.62f)
+                    lineTo(w*.61f,h*.49f); lineTo(w*.76f,h*.49f)
+                }
+                drawPath(pulse, White, style = Stroke(stroke, cap = StrokeCap.Round, join = StrokeJoin.Round))
             }
             ExerciseKind.AMRAP -> {
-                drawCircle(White,size.width*.34f,style=Stroke(stroke))
-                line(.5f,.28f,.5f,.52f); line(.5f,.52f,.68f,.62f)
+                // Legacy exercises retain a recognizable circular timer icon.
+                ring(.50f,.53f,.31f)
+                line(.50f,.53f,.50f,.34f)
+                line(.50f,.53f,.65f,.60f)
+                line(.50f,.10f,.50f,.18f)
             }
         }
     }
@@ -2857,7 +2883,7 @@ private fun TrainingScreen(
                     }
                 }
 
-                if (workouts.isEmpty()) {
+                if (workouts.none { it.kind != WorkoutKind.AMRAP }) {
                     Surface(
                         color = Panel,
                         shape = RoundedCornerShape(24.dp),
@@ -2872,7 +2898,7 @@ private fun TrainingScreen(
                             Text("Noch kein Workout erstellt", color = White, fontSize = 16.sp, fontWeight = FontWeight.Medium)
                             Spacer(Modifier.height(6.dp))
                             Text(
-                                "Erstelle ein Workout mit eigenem oder vorgeschlagenem Namen und tippe darauf, um deine Übungen zu verwalten.",
+                                "Klassische Workouts erscheinen hier. AMRAP-Ergebnisse findest du im AMRAP-Verlauf.",
                                 color = Muted,
                                 fontSize = 12.sp,
                                 lineHeight = 17.sp
@@ -2897,7 +2923,7 @@ private fun TrainingScreen(
                     }
                 } else {
                     Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
-                        workouts.forEach { workout ->
+                        workouts.filter { it.kind != WorkoutKind.AMRAP }.forEach { workout ->
                             val wExercises = workout.exerciseIds.mapNotNull { id -> exercises.find { it.id == id } }
                             val todaySetsInWorkout = todayLogs.count { it.exerciseId in workout.exerciseIds }
 
@@ -3689,7 +3715,7 @@ private fun AmrapLiveDialog(
         while (running) {
             now = System.currentTimeMillis()
             if (now >= endAt) { finish(true); break }
-            delay(100)
+            delay(25)
         }
     }
     fun togglePause() {
@@ -3715,7 +3741,8 @@ private fun AmrapLiveDialog(
                 Text("AMRAP · LIVE", color = Red, fontSize = 11.sp)
                 DisplayTitle(workout.name, ndot, fontSize = 25.sp)
                 Spacer(Modifier.height(14.dp))
-                DisplayTitle("%02d:%02d".format(Locale.GERMAN, ((left + 999) / 1000) / 60, ((left + 999) / 1000) % 60), ndot, fontSize = 46.sp)
+                DisplayTitle("%02d:%02d.%03d".format(Locale.GERMAN,
+                    left / 60000, (left / 1000) % 60, left % 1000), ndot, fontSize = 38.sp)
                 Text(if (running) "LÄUFT" else "PAUSIERT / BEREIT", color = Muted, fontSize = 11.sp)
                 Text("$rounds vollständige Runden", color = White, fontSize = 16.sp)
                 Spacer(Modifier.height(16.dp))
@@ -4046,9 +4073,28 @@ private fun WorkoutEditorDialog(
             shape = RoundedCornerShape(28.dp)
         ) {
             Column(Modifier.verticalScroll(rememberScrollState()).padding(22.dp)) {
-                DisplayTitle(title, ndot, fontSize = 24.sp)
-                Spacer(Modifier.height(14.dp))
+                Text("WORKOUT PLANEN", color = Red, fontSize = 10.sp,
+                    fontFamily = FontFamily.Monospace, letterSpacing = 1.3.sp)
+                Spacer(Modifier.height(6.dp))
+                DisplayTitle(if (isNew) "NEUES WORKOUT" else "WORKOUT BEARBEITEN", ndot, fontSize = 26.sp)
+                Text("Vorlage wählen, Details prüfen und Training öffnen.", color = Muted, fontSize = 12.sp)
+                Spacer(Modifier.height(16.dp))
 
+                Text("01  VORLAGE", color = Muted, fontSize = 10.sp, fontFamily = FontFamily.Monospace)
+                Spacer(Modifier.height(8.dp))
+                Surface(
+                    color = Panel2,
+                    shape = RoundedCornerShape(16.dp),
+                    modifier = Modifier.fillMaxWidth().clickable { showPresetPicker = true }
+                ) {
+                    Row(Modifier.padding(16.dp), verticalAlignment = Alignment.CenterVertically) {
+                        Text("WORKOUT-VORLAGE WÄHLEN", color = White, fontSize = 12.sp, modifier = Modifier.weight(1f))
+                        Text("›", color = Muted)
+                    }
+                }
+                Spacer(Modifier.height(8.dp))
+                Text("02  DETAILS", color = Muted, fontSize = 10.sp, fontFamily = FontFamily.Monospace,
+                    modifier = Modifier.padding(top = 8.dp, bottom = 8.dp))
                 OutlinedTextField(
                     value = name,
                     onValueChange = {
@@ -4086,17 +4132,8 @@ private fun WorkoutEditorDialog(
                         modifier = Modifier.fillMaxWidth().padding(top = 8.dp))
                 }
                 Spacer(Modifier.height(10.dp))
-                Surface(
-                    color = Panel2,
-                    shape = RoundedCornerShape(16.dp),
-                    modifier = Modifier.fillMaxWidth().clickable { showPresetPicker = true }
-                ) {
-                    Row(Modifier.padding(16.dp), verticalAlignment = Alignment.CenterVertically) {
-                        Text("WORKOUT-VORLAGE WÄHLEN", color = White, fontSize = 12.sp, modifier = Modifier.weight(1f))
-                        Text("›", color = Muted)
-                    }
-                }
-                Spacer(Modifier.height(8.dp))
+                Text("03  ÜBUNGEN", color = Muted, fontSize = 10.sp, fontFamily = FontFamily.Monospace,
+                    modifier = Modifier.padding(top = 8.dp, bottom = 8.dp))
                 Surface(
                     color = Panel2,
                     shape = RoundedCornerShape(16.dp),
@@ -4110,7 +4147,13 @@ private fun WorkoutEditorDialog(
                 if (presetNotice.isNotBlank()) Text(presetNotice, color = Muted, fontSize = 11.sp,
                     modifier = Modifier.padding(top = 8.dp))
 
-                Spacer(Modifier.height(18.dp))
+                Spacer(Modifier.height(12.dp))
+                Text(if (isNew && workoutKind == WorkoutKind.AMRAP)
+                    "Das Workout wird angelegt und der AMRAP-Zähler geöffnet. Der Countdown startet erst mit STARTEN."
+                    else if (isNew) "Das Workout wird angelegt und anschließend geöffnet."
+                    else "Änderungen werden gespeichert.",
+                    color = Muted, fontSize = 11.sp, lineHeight = 15.sp)
+                Spacer(Modifier.height(16.dp))
                 Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.End) {
                     TextButton(onClick = onDismiss) { Text("Abbrechen") }
                     TextButton(
@@ -4126,7 +4169,7 @@ private fun WorkoutEditorDialog(
                                 if (workoutKind == WorkoutKind.CLASSIC) 0 else (durationText.toIntOrNull() ?: 20).coerceIn(1, 480) * 60,
                                 selectedPresetTargets.filterKeys { it in selectedIds })
                         }
-                    ) { Text(if (isNew) "Erstellen" else "Speichern") }
+                    ) { Text(if (!isNew) "SPEICHERN" else if (workoutKind == WorkoutKind.AMRAP) "ZUM AMRAP-ZÄHLER →" else "WORKOUT ERSTELLEN →") }
                 }
             }
         }
@@ -5564,7 +5607,7 @@ private fun SetupScreen(
         )
         HorizontalDivider(color = Color(0xFF242424), modifier = Modifier.padding(top = 6.dp))
         Text(
-            "NPLANNER · VERSION 0.34",
+            "NPLANNER · VERSION 0.35",
             color = Color(0xFFB6B6B6),
             fontFamily = FontFamily.Monospace,
             fontSize = 10.sp,
