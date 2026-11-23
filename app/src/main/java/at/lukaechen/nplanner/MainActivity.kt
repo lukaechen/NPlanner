@@ -2688,6 +2688,7 @@ private fun TrainingScreen(
     var exerciseDescending by remember { mutableStateOf(false) }
     var groupExercises by remember { mutableStateOf(true) }
     var showExerciseFilters by remember { mutableStateOf(false) }
+    var showAiExerciseMenu by remember { mutableStateOf(false) }
     val amrapResults = remember(resultRevision, subPage) {
         resultPrefs.all.entries.filter { it.key.startsWith("amrap_session:") }
             .mapNotNull { runCatching { JSONObject(it.value as String) }.getOrNull() }
@@ -3020,27 +3021,25 @@ private fun TrainingScreen(
 
             // ================= UNTERSEITE 1: ALLE ÜBUNGEN =================
             1 -> {
-                OutlinedTextField(exerciseQuery, { exerciseQuery = it }, label = { Text("Übung suchen") },
-                    singleLine = true, modifier = Modifier.fillMaxWidth())
-                TextButton(onClick = { showExerciseFilters = !showExerciseFilters }) {
-                    Text("Filter & Sortierung · ${visibleExercises.size} Übungen", color = White)
-                }
-                if (showExerciseFilters) {
-                    Row(Modifier.horizontalScroll(rememberScrollState()), horizontalArrangement = Arrangement.spacedBy(6.dp)) {
-                        ChoiceChip("Alle", kindFilter == null, Modifier.width(70.dp)) { kindFilter = null }
-                        ExerciseKind.values().forEach { kind ->
-                            ChoiceChip(exerciseKindLabel(kind), kindFilter == kind, Modifier.width(135.dp)) { kindFilter = kind }
-                        }
-                    }
-                    Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                        TextButton(onClick = { exerciseDescending = !exerciseDescending }) {
-                            Text(if (exerciseDescending) "Name Z–A" else "Name A–Z", color = White)
-                        }
-                        TextButton(onClick = { groupExercises = !groupExercises }) {
-                            Text(if (groupExercises) "✓ Nach Art gruppiert" else "Nicht gruppiert", color = White)
+                Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                    OutlinedTextField(
+                        exerciseQuery, { exerciseQuery = it },
+                        label = { Text("Übungen durchsuchen") }, singleLine = true,
+                        modifier = Modifier.weight(1f)
+                    )
+                    Surface(color = Panel2, shape = RoundedCornerShape(14.dp),
+                        modifier = Modifier.size(52.dp).clickable { showExerciseFilters = true }) {
+                        Box(contentAlignment = Alignment.Center) {
+                            Text("☷", color = White, fontSize = 23.sp)
                         }
                     }
                 }
+                Text("${visibleExercises.size} ÜBUNGEN · " +
+                    (if (groupExercises) "NACH ART" else "ALLE ARTEN") + " · " +
+                    (if (exerciseDescending) "Z–A" else "A–Z"),
+                    color = Muted, fontFamily = FontFamily.Monospace, fontSize = 10.sp,
+                    modifier = Modifier.padding(top = 8.dp, bottom = 10.dp))
                 Row(
                     Modifier.fillMaxWidth(),
                     horizontalArrangement = Arrangement.spacedBy(8.dp)
@@ -3073,7 +3072,7 @@ private fun TrainingScreen(
                         modifier = Modifier
                             .weight(1.3f)
                             .height(44.dp)
-                            .clickable { shareAiPromptToExternalApp() },
+                            .clickable { showAiExerciseMenu = true },
                         color = Panel,
                         shape = RoundedCornerShape(14.dp)
                     ) {
@@ -3095,35 +3094,14 @@ private fun TrainingScreen(
                         }
                     }
 
-                    Surface(
-                        modifier = Modifier
-                            .height(44.dp)
-                            .clickable {
-                                onHapticTick()
-                                targetWorkoutForNewEx = null
-                                showAiImportDialog = true
-                            },
-                        color = Panel2,
-                        shape = RoundedCornerShape(14.dp)
-                    ) {
-                        Box(Modifier.padding(horizontal = 12.dp), contentAlignment = Alignment.Center) {
-                            Text(
-                                "JSON",
-                                color = White,
-                                fontFamily = FontFamily.Monospace,
-                                fontSize = 11.sp,
-                                letterSpacing = 1.sp
-                            )
-                        }
-                    }
                 }
 
-                SectionLabel("ALLE ÜBUNGEN (${exercises.size})", topPadding = 18.dp, bottomPadding = 10.dp)
+                SectionLabel("ÜBUNGSBIBLIOTHEK", topPadding = 14.dp, bottomPadding = 10.dp)
 
-                if (exercises.isEmpty()) {
+                if (visibleExercises.isEmpty()) {
                     Surface(color = Panel, shape = RoundedCornerShape(22.dp), modifier = Modifier.fillMaxWidth()) {
                         Text(
-                            "Noch keine Übungen vorhanden.",
+                            "Keine passenden Übungen gefunden.",
                             color = Muted,
                             fontSize = 12.sp,
                             modifier = Modifier.padding(18.dp)
@@ -3201,7 +3179,7 @@ private fun TrainingScreen(
                                 Text("REKORDE", color = Muted, fontFamily = FontFamily.Monospace, fontSize = 9.sp, letterSpacing = 1.4.sp)
                             }
                             Spacer(Modifier.height(8.dp))
-                            DisplayTitle("${records.size + amrapResults.filter { it.optBoolean("completed") }.map { it.optString("signature") }.distinct().size}", ndot, fontSize = 32.sp)
+                            DisplayTitle("${records.size + amrapResults.map { it.optString("signature") }.distinct().size}", ndot, fontSize = 32.sp)
                         }
                     }
                     Surface(Modifier.weight(1f), color = Panel, shape = RoundedCornerShape(22.dp)) {
@@ -3217,13 +3195,12 @@ private fun TrainingScreen(
                     }
                 }
 
-                val amrapBests = amrapResults.filter { it.optBoolean("completed") }
-                    .groupBy { it.optString("signature") }
+                val amrapBests = amrapResults.groupBy { it.optString("signature") }
                     .values.mapNotNull { group -> group.maxByOrNull { it.optInt("score") } }
                 if (amrapBests.isNotEmpty()) {
-                    SectionLabel("AMRAP-BESTLEISTUNGEN", topPadding = 20.dp, bottomPadding = 10.dp)
+                    SectionLabel("AMRAP-REKORDE", topPadding = 12.dp, bottomPadding = 10.dp)
                     amrapBests.forEach { result -> AmrapResultCard(result, ndot) { selectedAmrapResult = result } }
-                    Text("Nur vollständig absolvierte Einheiten mit gleicher Dauer und Übungsfolge werden verglichen.", color = Muted, fontSize = 11.sp)
+                    Text("Bester Durchgang je Workout-Konfiguration. Vorzeitig beendete Einheiten bleiben entsprechend gekennzeichnet.", color = Muted, fontSize = 11.sp)
                 }
                 SectionLabel("PERSÖNLICHE BESTLEISTUNGEN", topPadding = 20.dp, bottomPadding = 10.dp)
 
@@ -3484,6 +3461,65 @@ private fun TrainingScreen(
         )
     }
 
+    if (showExerciseFilters) {
+        AlertDialog(
+            onDismissRequest = { showExerciseFilters = false },
+            containerColor = Panel, shape = RoundedCornerShape(26.dp),
+            title = { DisplayTitle("FILTER", ndot, fontSize = 25.sp) },
+            text = {
+                Column {
+                    Text("ÜBUNGSART", color = Muted, fontSize = 10.sp, fontFamily = FontFamily.Monospace)
+                    Spacer(Modifier.height(8.dp))
+                    Column(Modifier.heightIn(max = 235.dp).verticalScroll(rememberScrollState())) {
+                        (listOf<ExerciseKind?>(null) + ExerciseKind.values().toList()).forEach { kind ->
+                            Row(Modifier.fillMaxWidth().clickable { kindFilter = kind }.padding(vertical = 9.dp),
+                                verticalAlignment = Alignment.CenterVertically) {
+                                Text(if (kindFilter == kind) "●" else "○", color = if (kindFilter == kind) Red else Muted)
+                                Spacer(Modifier.width(12.dp))
+                                Text(kind?.let { exerciseKindLabel(it) } ?: "Alle Übungsarten", color = White)
+                            }
+                        }
+                    }
+                    HorizontalDivider(color = Color(0xFF303030))
+                    Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
+                        Text("Name absteigend (Z–A)", color = White, modifier = Modifier.weight(1f), fontSize = 13.sp)
+                        Switch(checked = exerciseDescending, onCheckedChange = { exerciseDescending = it })
+                    }
+                    Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
+                        Text("Nach Übungsart gruppieren", color = White, modifier = Modifier.weight(1f), fontSize = 13.sp)
+                        Switch(checked = groupExercises, onCheckedChange = { groupExercises = it })
+                    }
+                }
+            },
+            confirmButton = { TextButton(onClick = { showExerciseFilters = false }) { Text("Übernehmen") } },
+            dismissButton = { TextButton(onClick = {
+                kindFilter = null; exerciseDescending = false; groupExercises = true; showExerciseFilters = false
+            }) { Text("Zurücksetzen") } }
+        )
+    }
+    if (showAiExerciseMenu) {
+        AlertDialog(
+            onDismissRequest = { showAiExerciseMenu = false },
+            containerColor = Panel, shape = RoundedCornerShape(26.dp),
+            title = { DisplayTitle("MIT KI ANLEGEN", ndot, fontSize = 24.sp) },
+            text = {
+                Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                    Surface(color = Panel2, shape = RoundedCornerShape(16.dp),
+                        modifier = Modifier.fillMaxWidth().clickable {
+                            showAiExerciseMenu = false
+                            shareAiPromptToExternalApp()
+                        }) { Text("KI-Prompt erstellen  ↗", color = White, modifier = Modifier.padding(16.dp)) }
+                    Surface(color = Panel2, shape = RoundedCornerShape(16.dp),
+                        modifier = Modifier.fillMaxWidth().clickable {
+                            showAiExerciseMenu = false
+                            targetWorkoutForNewEx = null
+                            showAiImportDialog = true
+                        }) { Text("JSON importieren  ↗", color = White, modifier = Modifier.padding(16.dp)) }
+                }
+            },
+            confirmButton = { TextButton(onClick = { showAiExerciseMenu = false }) { Text("Schließen") } }
+        )
+    }
     if (showAiImportDialog) {
         val targetName = targetWorkoutForNewEx?.let { wid -> workouts.find { it.id == wid }?.name }
         AiExerciseImportDialog(
@@ -3518,28 +3554,73 @@ private fun AmrapResultCard(result: JSONObject, ndot: FontFamily, onClick: () ->
 
 @Composable
 private fun AmrapSummaryDialog(result: JSONObject, ndot: FontFamily, onClose: () -> Unit) {
+    val items = result.optJSONArray("items") ?: JSONArray()
+    val totalReps = (0 until items.length()).sumOf { items.optJSONObject(it)?.optInt("totalReps") ?: 0 }
+    val completed = result.optBoolean("completed")
+    val elapsedSeconds = result.optLong("elapsedMs") / 1000
     Dialog(onDismissRequest = onClose, properties = DialogProperties(usePlatformDefaultWidth = false)) {
-        Surface(Modifier.fillMaxWidth().padding(16.dp), color = Panel, shape = RoundedCornerShape(26.dp)) {
-            Column(Modifier.padding(20.dp).heightIn(max = 570.dp).verticalScroll(rememberScrollState())) {
-                DisplayTitle("AUSWERTUNG", ndot, fontSize = 26.sp)
-                Text(result.optString("name"), color = White, fontSize = 17.sp)
-                Spacer(Modifier.height(14.dp))
-                DisplayTitle("${result.optInt("rounds")} RUNDEN", ndot, fontSize = 30.sp)
-                Text("+ ${result.optInt("extraExercises")} vollständig absolvierte Übungen der nächsten Runde", color = Muted, fontSize = 12.sp)
-                Text("Aktive Zeit: ${result.optLong("elapsedMs") / 60000}:${"%02d".format(result.optLong("elapsedMs") / 1000 % 60)} · Vorgabe: ${result.optInt("durationSeconds") / 60} Min.", color = White, fontSize = 12.sp)
-                Text(if (result.optBoolean("completed")) "Zeit vollständig absolviert" else "Vorzeitig beendet · kein Rekordvergleich", color = Muted, fontSize = 11.sp)
-                SectionLabel("WIEDERHOLUNGEN PRO ÜBUNG", topPadding = 15.dp, bottomPadding = 8.dp)
-                val items = result.optJSONArray("items") ?: JSONArray()
-                for (i in 0 until items.length()) {
-                    val item = items.getJSONObject(i)
-                    Row(Modifier.fillMaxWidth().padding(vertical = 7.dp)) {
-                        Text(item.optString("name"), color = White, fontSize = 14.sp, modifier = Modifier.weight(1f))
-                        Text("${item.optInt("totalReps")} Wdh.", color = Red, fontSize = 13.sp)
-                    }
-                    Text("${item.optInt("target")} je Runde · ${item.optInt("sets")} vollständig bestätigt", color = Muted, fontSize = 10.sp)
+        Surface(Modifier.fillMaxWidth().padding(horizontal = 14.dp), color = Panel,
+            shape = RoundedCornerShape(28.dp)) {
+            Column(Modifier.padding(18.dp).heightIn(max = 610.dp).verticalScroll(rememberScrollState())) {
+                Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
+                    Box(Modifier.size(7.dp).background(Red, CircleShape))
+                    Spacer(Modifier.width(9.dp))
+                    Text("TRAININGSERGEBNIS", color = Muted, fontFamily = FontFamily.Monospace,
+                        fontSize = 10.sp, letterSpacing = 1.4.sp, modifier = Modifier.weight(1f))
+                    TextButton(onClick = onClose) { Text("✕", color = White) }
                 }
-                Text("Teilwiederholungen einer nicht bestätigten Übung werden nicht geschätzt.", color = Muted, fontSize = 11.sp, modifier = Modifier.padding(top = 12.dp))
-                TextButton(onClick = onClose, modifier = Modifier.align(Alignment.End)) { Text("Schließen", color = White) }
+                DisplayTitle(result.optString("name").uppercase(Locale.GERMAN), ndot, fontSize = 26.sp)
+                Text(if (completed) "ZEIT ABGELAUFEN · GESPEICHERT" else "VORZEITIG BEENDET · GESPEICHERT",
+                    color = if (completed) Red else Muted, fontSize = 10.sp,
+                    fontFamily = FontFamily.Monospace)
+                Spacer(Modifier.height(18.dp))
+                Surface(color = Panel2, shape = RoundedCornerShape(22.dp), modifier = Modifier.fillMaxWidth()) {
+                    Column(Modifier.padding(18.dp), horizontalAlignment = Alignment.CenterHorizontally) {
+                        DisplayTitle("${result.optInt("rounds")}", ndot, fontSize = 54.sp)
+                        Text("VOLLSTÄNDIGE RUNDEN", color = Muted, fontSize = 10.sp,
+                            fontFamily = FontFamily.Monospace)
+                        if (result.optInt("extraExercises") > 0) {
+                            Text("+ ${result.optInt("extraExercises")} Übungen der nächsten Runde", color = White,
+                                fontSize = 13.sp, modifier = Modifier.padding(top = 8.dp))
+                        }
+                    }
+                }
+                Spacer(Modifier.height(10.dp))
+                Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+                    Surface(Modifier.weight(1f), color = Panel2, shape = RoundedCornerShape(18.dp)) {
+                        Column(Modifier.padding(13.dp)) {
+                            DisplayTitle("$totalReps", ndot, fontSize = 28.sp)
+                            Text("WIEDERHOLUNGEN", color = Muted, fontSize = 9.sp)
+                        }
+                    }
+                    Surface(Modifier.weight(1f), color = Panel2, shape = RoundedCornerShape(18.dp)) {
+                        Column(Modifier.padding(13.dp)) {
+                            DisplayTitle("%02d:%02d".format(Locale.GERMAN, elapsedSeconds / 60, elapsedSeconds % 60), ndot, fontSize = 28.sp)
+                            Text("TRAININGSZEIT", color = Muted, fontSize = 9.sp)
+                        }
+                    }
+                }
+                SectionLabel("ÜBUNGEN", topPadding = 18.dp, bottomPadding = 9.dp)
+                for (i in 0 until items.length()) {
+                    val item = items.optJSONObject(i) ?: continue
+                    Row(Modifier.fillMaxWidth().padding(vertical = 9.dp), verticalAlignment = Alignment.CenterVertically) {
+                        Box(Modifier.size(28.dp).background(Panel2, CircleShape), contentAlignment = Alignment.Center) {
+                            Text("${i + 1}", color = Muted, fontSize = 11.sp)
+                        }
+                        Spacer(Modifier.width(12.dp))
+                        Column(Modifier.weight(1f)) {
+                            Text(item.optString("name"), color = White, fontSize = 14.sp)
+                            Text("${item.optInt("target")} pro Runde", color = Muted, fontSize = 10.sp)
+                        }
+                        Text("${item.optInt("totalReps")}", color = White, fontSize = 17.sp,
+                            fontFamily = FontFamily.Monospace)
+                    }
+                    if (i < items.length() - 1) HorizontalDivider(color = Color(0xFF303030))
+                }
+                Spacer(Modifier.height(14.dp))
+                Button(onClick = onClose, modifier = Modifier.fillMaxWidth().height(48.dp),
+                    colors = ButtonDefaults.buttonColors(containerColor = White, contentColor = Bg),
+                    shape = RoundedCornerShape(16.dp)) { Text("FERTIG") }
             }
         }
     }
@@ -3655,8 +3736,35 @@ private fun AmrapLiveDialog(
                     colors = ButtonDefaults.buttonColors(containerColor = White, contentColor = Bg)) {
                     Text(if (running) "ÜBUNG ERLEDIGT ✓" else if (remaining == durationMs) "STARTEN" else "FORTSETZEN")
                 }
-                TextButton(onClick = { togglePause() }, enabled = !finished && (running || remaining < durationMs)) {
-                    Text(if (running) "Pause" else "Fortsetzen", color = White)
+                Box(Modifier.fillMaxWidth().padding(top = 10.dp), contentAlignment = Alignment.Center) {
+                    Surface(
+                        modifier = Modifier.size(56.dp).clip(CircleShape).clickable(
+                            enabled = !finished && (running || remaining < durationMs),
+                            onClickLabel = if (running) "Training pausieren" else "Training fortsetzen"
+                        ) { togglePause() },
+                        color = Panel2, shape = CircleShape
+                    ) {
+                        Box(contentAlignment = Alignment.Center) {
+                            Canvas(Modifier.size(24.dp)) {
+                                if (running) {
+                                    drawRoundRect(White, Offset(size.width*.19f,size.height*.15f),
+                                        Size(size.width*.22f,size.height*.70f),
+                                        androidx.compose.ui.geometry.CornerRadius(2.dp.toPx()))
+                                    drawRoundRect(White, Offset(size.width*.59f,size.height*.15f),
+                                        Size(size.width*.22f,size.height*.70f),
+                                        androidx.compose.ui.geometry.CornerRadius(2.dp.toPx()))
+                                } else {
+                                    val triangle = Path().apply {
+                                        moveTo(size.width*.28f,size.height*.12f)
+                                        lineTo(size.width*.85f,size.height*.5f)
+                                        lineTo(size.width*.28f,size.height*.88f)
+                                        close()
+                                    }
+                                    drawPath(triangle, White)
+                                }
+                            }
+                        }
+                    }
                 }
                 Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
                     TextButton(onClick = onDismiss) { Text("Minimieren", color = Muted) }
@@ -5456,7 +5564,7 @@ private fun SetupScreen(
         )
         HorizontalDivider(color = Color(0xFF242424), modifier = Modifier.padding(top = 6.dp))
         Text(
-            "NPLANNER · VERSION 0.33",
+            "NPLANNER · VERSION 0.34",
             color = Color(0xFFB6B6B6),
             fontFamily = FontFamily.Monospace,
             fontSize = 10.sp,
