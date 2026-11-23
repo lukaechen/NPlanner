@@ -17,6 +17,11 @@ import androidx.activity.ComponentActivity
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.compose.setContent
 import androidx.activity.result.contract.ActivityResultContracts
+import androidx.compose.animation.AnimatedContent
+import androidx.compose.animation.slideInHorizontally
+import androidx.compose.animation.slideOutHorizontally
+import androidx.compose.animation.togetherWith
+import androidx.compose.foundation.gestures.detectHorizontalDragGestures
 import androidx.compose.animation.core.FastOutSlowInEasing
 import androidx.compose.animation.core.Spring
 import androidx.compose.animation.core.Animatable
@@ -685,7 +690,7 @@ class MainActivity : ComponentActivity() {
 
     private fun saveExerciseLogs(logs: List<ExerciseLog>) {
         val arr = JSONArray()
-        logs.takeLast(500).forEach { log ->
+        logs.forEach { log ->
             arr.put(
                 JSONObject()
                     .put("id", log.id)
@@ -753,6 +758,7 @@ class MainActivity : ComponentActivity() {
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
+        NPlannerRoomBridge.start(applicationContext, prefs)
         setContent {
             val ndot = FontFamily(androidx.compose.ui.text.font.Font(resId = R.font.ndot_47))
             MaterialTheme(
@@ -1018,48 +1024,47 @@ class MainActivity : ComponentActivity() {
             tick++
         }
 
-        val pagerState = rememberPagerState(pageCount = { 4 })
-        val scope = rememberCoroutineScope()
-        var navTargetPage by remember { mutableIntStateOf(0) }
-        var isNavAnimating by remember { mutableStateOf(false) }
-        val pageShift = remember { Animatable(0f) }
-
+        var selectedPage by remember { mutableIntStateOf(0) }
         fun selectPage(target: Int) {
-            if (!isNavAnimating && target in 0..3 && target != pagerState.currentPage) {
+            if (target in 0..3 && target != selectedPage) {
+                selectedPage = target
                 triggerHaptic(context, haptic, HapticStyle.TICK)
-                navTargetPage = target
-                isNavAnimating = true
-                scope.launch {
-                    try {
-                        val direction = if (target > pagerState.currentPage) -1f else 1f
-                        // Swipe-like slide without exposing any intermediate tabs.
-                        pageShift.animateTo(direction * 32f, tween(85, easing = FastOutSlowInEasing))
-                        pagerState.scrollToPage(target)
-                        pageShift.snapTo(-direction * 32f)
-                        pageShift.animateTo(0f, tween(170, easing = FastOutSlowInEasing))
-                    } finally {
-                        pageShift.snapTo(0f)
-                        isNavAnimating = false
-                    }
-                }
             }
         }
-
-        LaunchedEffect(pagerState.isScrollInProgress) {
-            if (!pagerState.isScrollInProgress && !isNavAnimating) {
-                navTargetPage = pagerState.currentPage
-            }
-        }
+        var dragTotal by remember { mutableFloatStateOf(0f) }
 
         CompositionLocalProvider(LocalDotHeadings provides dotHeadings) {
             Box(Modifier.fillMaxSize().background(Bg)) {
-                HorizontalPager(
-                    state = pagerState,
-                    beyondViewportPageCount = 1,
-                    userScrollEnabled = !isNavAnimating,
-                    modifier = Modifier.fillMaxSize().graphicsLayer {
-                        translationX = pageShift.value
-                    }
+                AnimatedContent(
+                    targetState = selectedPage,
+                    modifier = Modifier.fillMaxSize().pointerInput(selectedPage) {
+                        detectHorizontalDragGestures(
+                            onDragStart = { dragTotal = 0f },
+                            onHorizontalDrag = { change, delta ->
+                                change.consume()
+                                dragTotal += delta
+                            },
+                            onDragEnd = {
+                                when {
+                                    dragTotal < -75f -> selectPage(selectedPage + 1)
+                                    dragTotal > 75f -> selectPage(selectedPage - 1)
+                                }
+                                dragTotal = 0f
+                            },
+                            onDragCancel = { dragTotal = 0f }
+                        )
+                    },
+                    transitionSpec = {
+                        val forward = targetState > initialState
+                        val enter = slideInHorizontally(tween(260, easing = FastOutSlowInEasing)) {
+                            if (forward) it else -it
+                        }
+                        val exit = slideOutHorizontally(tween(260, easing = FastOutSlowInEasing)) {
+                            if (forward) -it else it
+                        }
+                        enter togetherWith exit
+                    },
+                    label = "directPageSwipe"
                 ) { p ->
                     when (p) {
                         0 -> TodayScreen(
@@ -1203,8 +1208,7 @@ class MainActivity : ComponentActivity() {
                     }
                 }
                 GlyphNav(
-                    pagerState = pagerState,
-                    directTarget = if (isNavAnimating) navTargetPage else null,
+                    selectedPage = selectedPage,
                     select = ::selectPage,
                     modifier = Modifier.align(Alignment.BottomCenter)
                 )
@@ -4281,28 +4285,16 @@ private enum class NavGlyph { TODAY, HISTORY, TRAINING, SETUP }
 @OptIn(ExperimentalFoundationApi::class)
 @Composable
 private fun GlyphNav(
-    pagerState: androidx.compose.foundation.pager.PagerState,
-    directTarget: Int?,
+    selectedPage: Int,
     select: (Int) -> Unit,
     modifier: Modifier
 ) {
     val glyphs = listOf(NavGlyph.TODAY, NavGlyph.HISTORY, NavGlyph.TRAINING, NavGlyph.SETUP)
-
-    val targetFraction = if (directTarget != null) {
-        directTarget.toFloat()
-    } else {
-        (pagerState.currentPage + pagerState.currentPageOffsetFraction).coerceIn(0f, 3f)
-    }
     val pillFraction by animateFloatAsState(
-        targetValue = targetFraction,
-        animationSpec = if (directTarget != null) {
-            tween(durationMillis = 260, easing = FastOutSlowInEasing)
-        } else {
-            spring(dampingRatio = Spring.DampingRatioNoBouncy, stiffness = Spring.StiffnessHigh)
-        },
+        targetValue = selectedPage.toFloat(),
+        animationSpec = tween(durationMillis = 260, easing = FastOutSlowInEasing),
         label = "nav_pill_slide"
     )
-
     Surface(
         modifier = modifier
             .navigationBarsPadding()
@@ -4339,7 +4331,7 @@ private fun GlyphNav(
                     val interactionSource = remember { MutableInteractionSource() }
                     val distance = kotlin.math.abs(pillFraction - i).coerceIn(0f, 1f)
                     val activeWeight = 1f - distance
-                    val activeTab = directTarget ?: pagerState.currentPage
+                    val activeTab = selectedPage
                     val iconScale by animateFloatAsState(
                         targetValue = if (activeTab == i) 1.06f else 0.96f,
                         animationSpec = spring(dampingRatio = Spring.DampingRatioMediumBouncy, stiffness = Spring.StiffnessMediumLow),
@@ -4794,7 +4786,7 @@ private fun SetupScreen(
         )
         HorizontalDivider(color = Color(0xFF242424), modifier = Modifier.padding(top = 6.dp))
         Text(
-            "NPLANNER · VERSION 0.25",
+            "NPLANNER · VERSION 0.26",
             color = Color(0xFFB6B6B6),
             fontFamily = FontFamily.Monospace,
             fontSize = 10.sp,
