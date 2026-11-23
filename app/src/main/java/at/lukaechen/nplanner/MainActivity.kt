@@ -198,11 +198,15 @@ data class ExerciseLog(
     val distanceKm: Float = 0f
 )
 
+enum class WorkoutKind { CLASSIC, AMRAP, FOR_TIME, EMOM }
+
 data class Workout(
     val id: String,
     val name: String,
     val exerciseIds: List<String> = emptyList(),
-    val note: String = ""
+    val note: String = "",
+    val kind: WorkoutKind = WorkoutKind.CLASSIC,
+    val durationSeconds: Int = 0
 )
 
 private val LocalDotHeadings = compositionLocalOf { false }
@@ -443,7 +447,9 @@ private fun parseNpefExercises(rawInput: String): Result<List<Exercise>> = runCa
             steps = stepsList,
             targetWeightKg = o.optDouble("targetWeightKg", 20.0).toFloat().coerceIn(0f, 500f),
             targetReps = o.optInt("targetReps", 10).coerceIn(1, 500),
-            targetSeconds = o.optInt("targetSeconds", 45).coerceIn(1, 3600)
+            targetSeconds = o.optInt("targetSeconds", 45).coerceIn(1, 3600),
+            mediaPath = o.optString("mediaUrl", "").takeIf { validatedMediaUrl(it) != null } ?: "",
+            mediaIsVideo = o.optBoolean("mediaIsVideo", false)
         )
     }
 }
@@ -463,6 +469,8 @@ private fun exportNpefJson(exercises: List<Exercise>): String {
                 .put("targetWeightKg", ex.targetWeightKg.toDouble())
                 .put("targetReps", ex.targetReps)
                 .put("targetSeconds", ex.targetSeconds)
+                .put("mediaUrl", ex.mediaPath.takeIf { validatedMediaUrl(it) != null } ?: "")
+                .put("mediaIsVideo", ex.mediaIsVideo)
         )
     }
     return JSONObject()
@@ -735,7 +743,9 @@ class MainActivity : ComponentActivity() {
                     id = o.getString("id"),
                     name = o.optString("name", "Workout").ifBlank { "Workout" },
                     exerciseIds = ids,
-                    note = o.optString("note", "")
+                    note = o.optString("note", ""),
+                    kind = runCatching { WorkoutKind.valueOf(o.optString("kind", "CLASSIC")) }.getOrDefault(WorkoutKind.CLASSIC),
+                    durationSeconds = o.optInt("durationSeconds", 0)
                 )
             }
         }
@@ -750,6 +760,8 @@ class MainActivity : ComponentActivity() {
                     .put("name", w.name)
                     .put("exerciseIds", JSONArray(w.exerciseIds))
                     .put("note", w.note)
+                    .put("kind", w.kind.name)
+                    .put("durationSeconds", w.durationSeconds)
             )
         }
         prefs.edit().putString("workouts_v1", arr.toString()).apply()
@@ -2560,6 +2572,46 @@ private fun bestRecordText(ex: Exercise, logs: List<ExerciseLog>): Pair<String, 
 }
 
 @Composable
+private fun ExerciseKindIcon(kind: ExerciseKind) {
+    Canvas(Modifier.size(27.dp)) {
+        val stroke = 2.dp.toPx()
+        fun line(x1: Float, y1: Float, x2: Float, y2: Float) =
+            drawLine(White, Offset(size.width*x1, size.height*y1), Offset(size.width*x2, size.height*y2), stroke, StrokeCap.Round)
+        when (kind) {
+            ExerciseKind.WEIGHT -> {
+                line(.25f,.5f,.75f,.5f)
+                listOf(.17f,.30f,.70f,.83f).forEach { x -> line(x,.29f,x,.71f) }
+            }
+            ExerciseKind.BODYWEIGHT -> {
+                drawCircle(White, size.width*.09f, Offset(size.width*.5f,size.height*.19f))
+                line(.5f,.3f,.5f,.62f); line(.5f,.4f,.24f,.56f); line(.5f,.4f,.76f,.56f)
+                line(.5f,.62f,.29f,.88f); line(.5f,.62f,.71f,.88f)
+            }
+            ExerciseKind.TIMED -> {
+                drawCircle(White,size.width*.31f,Offset(size.width*.5f,size.height*.55f),style=Stroke(stroke))
+                line(.5f,.55f,.5f,.35f); line(.5f,.55f,.64f,.64f); line(.4f,.13f,.6f,.13f)
+                line(.5f,.13f,.5f,.23f)
+            }
+            ExerciseKind.CARDIO -> {
+                val path = Path().apply {
+                    moveTo(size.width*.10f,size.height*.55f)
+                    lineTo(size.width*.31f,size.height*.55f)
+                    lineTo(size.width*.40f,size.height*.31f)
+                    lineTo(size.width*.53f,size.height*.77f)
+                    lineTo(size.width*.64f,size.height*.49f)
+                    lineTo(size.width*.90f,size.height*.49f)
+                }
+                drawPath(path, White, style=Stroke(stroke,cap=StrokeCap.Round,join=StrokeJoin.Round))
+            }
+            ExerciseKind.AMRAP -> {
+                drawCircle(White,size.width*.34f,style=Stroke(stroke))
+                line(.5f,.28f,.5f,.52f); line(.5f,.52f,.68f,.62f)
+            }
+        }
+    }
+}
+
+@Composable
 private fun TrainingScreen(
     ndot: FontFamily,
     today: LocalDate,
@@ -2601,6 +2653,39 @@ private fun TrainingScreen(
     var editingWorkout by remember { mutableStateOf<Workout?>(null) }
     var showNewExerciseDialog by remember { mutableStateOf(false) }
     var showAiImportDialog by remember { mutableStateOf(false) }
+    var pendingExerciseExport by remember { mutableStateOf("") }
+    val exportLauncher = rememberLauncherForActivityResult(ActivityResultContracts.CreateDocument("application/json")) { uri ->
+        if (uri != null && pendingExerciseExport.isNotBlank()) {
+            runCatching {
+                context.contentResolver.openOutputStream(uri)?.bufferedWriter()?.use { it.write(pendingExerciseExport) }
+            }.onFailure { Toast.makeText(context, "Export fehlgeschlagen.", Toast.LENGTH_SHORT).show() }
+        }
+    }
+    fun shareExercise(ex: Exercise) {
+        val payload = exportNpefJson(listOf(ex))
+        runCatching {
+            context.startActivity(Intent.createChooser(Intent(Intent.ACTION_SEND).apply {
+                type = "text/plain"
+                putExtra(Intent.EXTRA_TEXT, payload)
+            }, "Übung teilen"))
+        }
+    }
+    var pendingExerciseExport by remember { mutableStateOf("") }
+    val exportLauncher = rememberLauncherForActivityResult(ActivityResultContracts.CreateDocument("application/json")) { uri ->
+        if (uri != null && pendingExerciseExport.isNotBlank()) {
+            runCatching {
+                context.contentResolver.openOutputStream(uri)?.bufferedWriter()?.use { it.write(pendingExerciseExport) }
+            }.onFailure { Toast.makeText(context, "Export fehlgeschlagen.", Toast.LENGTH_SHORT).show() }
+        }
+    }
+    fun shareExercise(ex: Exercise) {
+        val payload = exportNpefJson(listOf(ex))
+        context.startActivity(Intent.createChooser(Intent(Intent.ACTION_SEND).apply {
+            type = "application/json"
+            putExtra(Intent.EXTRA_TEXT, payload)
+        }, "Übung teilen"))
+    }
+
     var targetWorkoutForNewEx by remember { mutableStateOf<String?>(null) }
 
     val todayStr = today.toString()
@@ -2972,18 +3057,7 @@ private fun TrainingScreen(
                                             .background(Panel2),
                                         contentAlignment = Alignment.Center
                                     ) {
-                                        Text(
-                                            text = when {
-                                                ex.mediaPath.isNotBlank() && ex.mediaIsVideo -> "▶"
-                                                ex.mediaPath.isNotBlank() -> "▣"
-                                                ex.kind == ExerciseKind.WEIGHT -> "KG"
-                                                ex.kind == ExerciseKind.BODYWEIGHT -> "BW"
-                                                else -> "⏱"
-                                            },
-                                            color = White,
-                                            fontFamily = FontFamily.Monospace,
-                                            fontSize = 12.sp
-                                        )
+                                        ExerciseKindIcon(ex.kind)
                                     }
                                     Spacer(Modifier.width(14.dp))
                                     Column(Modifier.weight(1f)) {
@@ -3179,16 +3253,20 @@ private fun TrainingScreen(
             initialName = suggestWorkoutName(workouts, emptyList()),
             initialNote = "",
             initialSelectedIds = emptySet(),
+            initialKind = WorkoutKind.CLASSIC,
+            initialDurationSeconds = 0,
             existingWorkouts = workouts,
             allExercises = exercises,
             isNew = true,
             onDismiss = { showNewWorkoutDialog = false },
-            onSave = { finalName, note, selectedIds ->
+            onSave = { finalName, note, selectedIds, kind, durationSeconds ->
                 val created = Workout(
                     id = UUID.randomUUID().toString(),
                     name = finalName,
                     exerciseIds = selectedIds,
-                    note = note
+                    note = note,
+                    kind = kind,
+                    durationSeconds = durationSeconds
                 )
                 onCreateWorkout(created)
                 showNewWorkoutDialog = false
@@ -3204,16 +3282,20 @@ private fun TrainingScreen(
             initialName = wToEdit.name,
             initialNote = wToEdit.note,
             initialSelectedIds = wToEdit.exerciseIds.toSet(),
+            initialKind = wToEdit.kind,
+            initialDurationSeconds = wToEdit.durationSeconds,
             existingWorkouts = workouts,
             allExercises = exercises,
             isNew = false,
             onDismiss = { editingWorkout = null },
-            onSave = { finalName, note, selectedIds ->
+            onSave = { finalName, note, selectedIds, kind, durationSeconds ->
                 onUpdateWorkout(
                     wToEdit.copy(
                         name = finalName,
                         note = note,
-                        exerciseIds = selectedIds
+                        exerciseIds = selectedIds,
+                        kind = kind,
+                        durationSeconds = durationSeconds
                     )
                 )
                 editingWorkout = null
@@ -3239,6 +3321,11 @@ private fun TrainingScreen(
                         onUpdateWorkout(w.copy(exerciseIds = w.exerciseIds.filterNot { it == freshEx.id }))
                         activeExercise = null
                     }
+                },
+                onShareExercise = { shareExercise(freshEx) },
+                onExportExercise = {
+                    pendingExerciseExport = exportNpefJson(listOf(freshEx))
+                    exportLauncher.launch("${freshEx.name.replace(Regex("[^A-Za-z0-9_-]"), "_")}.npex.json")
                 },
                 onDeleteExercise = {
                     onDeleteExercise(freshEx.id)
@@ -3467,17 +3554,21 @@ private fun WorkoutEditorDialog(
     initialName: String,
     initialNote: String,
     initialSelectedIds: Set<String>,
+    initialKind: WorkoutKind,
+    initialDurationSeconds: Int,
     existingWorkouts: List<Workout>,
     allExercises: List<Exercise>,
     isNew: Boolean,
     onDismiss: () -> Unit,
-    onSave: (String, String, List<String>) -> Unit
+    onSave: (String, String, List<String>, WorkoutKind, Int) -> Unit
 ) {
     val context = LocalContext.current
     val haptic = LocalHapticFeedback.current
     var name by remember { mutableStateOf(initialName) }
     var nameManuallyEdited by remember { mutableStateOf(!isNew) }
     var note by remember { mutableStateOf(initialNote) }
+    var workoutKind by remember { mutableStateOf(initialKind) }
+    var durationText by remember { mutableStateOf((initialDurationSeconds / 60).takeIf { it > 0 }?.toString() ?: "20") }
     var selectedIds by remember { mutableStateOf(initialSelectedIds) }
 
     // Wenn noch kein eigener Name eingegeben wurde, passt sich der Vorschlag an die gewaehlten Uebungen an
@@ -3517,6 +3608,31 @@ private fun WorkoutEditorDialog(
                     modifier = Modifier.fillMaxWidth()
                 )
 
+                SectionLabel("WORKOUT-ART", topPadding = 14.dp, bottomPadding = 8.dp)
+                Row(Modifier.horizontalScroll(rememberScrollState()), horizontalArrangement = Arrangement.spacedBy(7.dp)) {
+                    listOf(
+                        WorkoutKind.CLASSIC to "Klassisch",
+                        WorkoutKind.AMRAP to "AMRAP",
+                        WorkoutKind.FOR_TIME to "For Time",
+                        WorkoutKind.EMOM to "EMOM"
+                    ).forEach { (kind, label) ->
+                        ChoiceChip(label, workoutKind == kind, Modifier.width(108.dp)) { workoutKind = kind }
+                    }
+                }
+                if (workoutKind != WorkoutKind.CLASSIC) {
+                    OutlinedTextField(durationText, { durationText = it.filter(Char::isDigit).take(3) },
+                        label = { Text(if (workoutKind == WorkoutKind.FOR_TIME) "Zeitlimit (Minuten)" else "Dauer (Minuten)") },
+                        keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
+                        modifier = Modifier.fillMaxWidth().padding(top = 8.dp))
+                }
+                if (isNew && workoutKind == WorkoutKind.AMRAP) {
+                    TextButton(onClick = {
+                        name = "Cindy"
+                        note = "20 Minuten AMRAP: 5 Klimmzüge, 10 Liegestütze, 15 Kniebeugen pro Runde."
+                        durationText = "20"
+                        nameManuallyEdited = true
+                    }) { Text("Cindy-Vorlage übernehmen", color = White) }
+                }
                 if (allExercises.isNotEmpty()) {
                     SectionLabel("ÜBUNGEN IM WORKOUT (${selectedIds.size})", topPadding = 18.dp, bottomPadding = 8.dp)
                     Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
@@ -3569,7 +3685,8 @@ private fun WorkoutEditorDialog(
                             )
                             val finalName = name.trim().ifBlank { fallback }
                             val orderedIds = allExercises.filter { it.id in selectedIds }.map { it.id }
-                            onSave(finalName, note.trim(), orderedIds)
+                            onSave(finalName, note.trim(), orderedIds, workoutKind,
+                                if (workoutKind == WorkoutKind.CLASSIC) 0 else (durationText.toIntOrNull() ?: 20).coerceIn(1, 480) * 60)
                         }
                     ) { Text(if (isNew) "Erstellen" else "Speichern") }
                 }
@@ -3588,6 +3705,8 @@ private fun ExerciseDetailDialog(
     onLogSet: (ExerciseLog) -> Unit,
     onRemoveFromWorkout: (() -> Unit)?,
     onDeleteExercise: () -> Unit,
+    onShareExercise: () -> Unit,
+    onExportExercise: () -> Unit,
     onHapticTick: () -> Unit
 ) {
     val lastLog = logs.lastOrNull()
@@ -3636,6 +3755,10 @@ private fun ExerciseDetailDialog(
                 }
 
                 DisplayTitle(exercise.name, ndot, fontSize = 26.sp)
+                Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                    TextButton(onClick = onShareExercise) { Text("Teilen ↗", color = White) }
+                    TextButton(onClick = onExportExercise) { Text("Als Datei exportieren", color = Muted) }
+                }
 
                 if (exercise.description.isNotBlank()) {
                     Spacer(Modifier.height(8.dp))
@@ -3890,8 +4013,27 @@ private fun String.endsWithAny(suffixes: List<String>): Boolean = suffixes.any {
 @Composable
 private fun ExerciseMediaViewer(mediaPath: String, isVideo: Boolean) {
     val external = remember(mediaPath) { validatedMediaUrl(mediaPath) }
+    if (isVideo) {
+        val context = LocalContext.current
+        val target = external
+        Surface(color = Panel2, shape = RoundedCornerShape(18.dp), modifier = Modifier.fillMaxWidth()) {
+            Column(Modifier.padding(16.dp)) {
+                Text("▶  VIDEOANLEITUNG", color = White, fontSize = 14.sp)
+                Text(if (external == null) "Für lokale Videos bitte einen HTTPS-Link hinterlegen." else "Video wird in einer externen App geöffnet.", color = Muted, fontSize = 11.sp)
+                TextButton(enabled = target != null, onClick = {
+                    target?.let { uri ->
+                        runCatching {
+                            context.startActivity(Intent(Intent.ACTION_VIEW, uri).apply {
+                            })
+                        }.onFailure { Toast.makeText(context, "Keine passende Video-App gefunden.", Toast.LENGTH_SHORT).show() }
+                    }
+                }) { Text("Video öffnen ↗", color = White) }
+            }
+        }
+        return
+    }
     if (external != null) {
-        ExternalMediaCard(external, isVideo)
+        ExternalMediaCard(external, false)
         return
     }
     val file = remember(mediaPath) { File(mediaPath) }
@@ -3904,23 +4046,7 @@ private fun ExerciseMediaViewer(mediaPath: String, isVideo: Boolean) {
             .clip(RoundedCornerShape(20.dp))
             .background(Bg)
     ) {
-        if (isVideo) {
-            AndroidView(
-                factory = { ctx ->
-                    VideoView(ctx).apply {
-                        setVideoURI(Uri.fromFile(file))
-                        val controller = MediaController(ctx)
-                        controller.setAnchorView(this)
-                        setMediaController(controller)
-                        setOnPreparedListener { mp ->
-                            mp.isLooping = true
-                            start()
-                        }
-                    }
-                },
-                modifier = Modifier.fillMaxSize()
-            )
-        } else {
+        run {
             val bitmap = remember(mediaPath) {
                 runCatching { android.graphics.BitmapFactory.decodeFile(mediaPath)?.asImageBitmap() }.getOrNull()
             }
@@ -4909,7 +5035,7 @@ private fun SetupScreen(
         )
         HorizontalDivider(color = Color(0xFF242424), modifier = Modifier.padding(top = 6.dp))
         Text(
-            "NPLANNER · VERSION 0.28",
+            "NPLANNER · VERSION 0.29",
             color = Color(0xFFB6B6B6),
             fontFamily = FontFamily.Monospace,
             fontSize = 10.sp,
