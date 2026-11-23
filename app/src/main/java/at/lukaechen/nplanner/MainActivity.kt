@@ -38,6 +38,7 @@ import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.foundation.verticalScroll
+import androidx.compose.foundation.horizontalScroll
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
@@ -107,7 +108,7 @@ enum class RuleKind { FIXED, INTERVAL, ALLDAY, WEEKLY }
 enum class HapticStyle { TASK_DONE, DAY_COMPLETE, UNDO, TICK }
 
 /** Sport-Uebungstypen: WEIGHT = Gewicht x Wdh., BODYWEIGHT = Eigengewicht x Wdh., TIMED = Zeit / X Wdh. in Y Sek. */
-enum class ExerciseKind { WEIGHT, BODYWEIGHT, TIMED }
+enum class ExerciseKind { WEIGHT, BODYWEIGHT, TIMED, CARDIO, AMRAP }
 
 data class Rule(
     val id: String,
@@ -188,7 +189,9 @@ data class ExerciseLog(
     val date: String,
     val weightKg: Float = 0f,
     val reps: Int = 0,
-    val seconds: Int = 0
+    val seconds: Int = 0,
+    val workoutId: String = "",
+    val distanceKm: Float = 0f
 )
 
 data class Workout(
@@ -255,9 +258,13 @@ private fun exerciseKindLabel(kind: ExerciseKind): String = when (kind) {
     ExerciseKind.WEIGHT -> "Gewicht"
     ExerciseKind.BODYWEIGHT -> "Körpergewicht"
     ExerciseKind.TIMED -> "Zeit / Intervall"
+    ExerciseKind.CARDIO -> "Cardio"
+    ExerciseKind.AMRAP -> "AMRAP / Runden"
 }
 
 private fun exerciseSummary(ex: Exercise): String = when (ex.kind) {
+    ExerciseKind.CARDIO -> "${ex.muscle} · Cardio · Ziel ${ex.targetSeconds / 60} Min."
+    ExerciseKind.AMRAP -> "${ex.muscle} · AMRAP · ${ex.targetSeconds / 60} Min. · ${ex.targetReps} Runden"
     ExerciseKind.WEIGHT -> "${ex.muscle} · Gewicht · Ziel ${fmtKg(ex.targetWeightKg)} × ${ex.targetReps}"
     ExerciseKind.BODYWEIGHT -> "${ex.muscle} · Körpergewicht · Ziel ${ex.targetReps} Wdh."
     ExerciseKind.TIMED -> if (ex.targetReps > 1) {
@@ -268,6 +275,9 @@ private fun exerciseSummary(ex: Exercise): String = when (ex.kind) {
 }
 
 private fun logSummary(ex: Exercise, log: ExerciseLog): String = when (ex.kind) {
+    ExerciseKind.CARDIO -> "${log.seconds / 60} Min. ${log.seconds % 60} Sek." +
+        if (log.distanceKm > 0f) " · ${fmtKg(log.distanceKm).replace(" kg", " km")}" else ""
+    ExerciseKind.AMRAP -> "${log.reps} Runden in ${log.seconds / 60} Min."
     ExerciseKind.WEIGHT -> "${fmtKg(log.weightKg)} × ${log.reps} Wdh."
     ExerciseKind.BODYWEIGHT -> "${log.reps} Wdh."
     ExerciseKind.TIMED -> if (log.reps > 1) "${log.reps} Wdh. in ${log.seconds} Sek." else "${log.seconds} Sek."
@@ -666,7 +676,9 @@ class MainActivity : ComponentActivity() {
                 date = o.getString("date"),
                 weightKg = o.optDouble("weightKg", 0.0).toFloat(),
                 reps = o.optInt("reps", 0),
-                seconds = o.optInt("seconds", 0)
+                seconds = o.optInt("seconds", 0),
+                workoutId = o.optString("workoutId", ""),
+                distanceKm = o.optDouble("distanceKm", 0.0).toFloat()
             )
         }
     } catch (_: Exception) { emptyList() }
@@ -682,6 +694,8 @@ class MainActivity : ComponentActivity() {
                     .put("weightKg", log.weightKg.toDouble())
                     .put("reps", log.reps)
                     .put("seconds", log.seconds)
+                    .put("workoutId", log.workoutId)
+                    .put("distanceKm", log.distanceKm.toDouble())
             )
         }
         prefs.edit().putString("exercise_logs_v1", arr.toString()).apply()
@@ -1009,7 +1023,6 @@ class MainActivity : ComponentActivity() {
         var navTargetPage by remember { mutableIntStateOf(0) }
         var isNavAnimating by remember { mutableStateOf(false) }
         val pageShift = remember { Animatable(0f) }
-        val pageOpacity = remember { Animatable(1f) }
 
         fun selectPage(target: Int) {
             if (!isNavAnimating && target in 0..3 && target != pagerState.currentPage) {
@@ -1020,15 +1033,12 @@ class MainActivity : ComponentActivity() {
                     try {
                         val direction = if (target > pagerState.currentPage) -1f else 1f
                         // Swipe-like slide without exposing any intermediate tabs.
-                        pageShift.animateTo(direction * 90f, tween(130, easing = FastOutSlowInEasing))
-                        pageOpacity.animateTo(0.12f, tween(80))
+                        pageShift.animateTo(direction * 32f, tween(85, easing = FastOutSlowInEasing))
                         pagerState.scrollToPage(target)
-                        pageShift.snapTo(-direction * 90f)
-                        pageShift.animateTo(0f, tween(230, easing = FastOutSlowInEasing))
-                        pageOpacity.animateTo(1f, tween(100))
+                        pageShift.snapTo(-direction * 32f)
+                        pageShift.animateTo(0f, tween(170, easing = FastOutSlowInEasing))
                     } finally {
                         pageShift.snapTo(0f)
-                        pageOpacity.snapTo(1f)
                         isNavAnimating = false
                     }
                 }
@@ -1049,7 +1059,6 @@ class MainActivity : ComponentActivity() {
                     userScrollEnabled = !isNavAnimating,
                     modifier = Modifier.fillMaxSize().graphicsLayer {
                         translationX = pageShift.value
-                        alpha = pageOpacity.value
                     }
                 ) { p ->
                     when (p) {
@@ -2515,6 +2524,14 @@ private fun bestRecordText(ex: Exercise, logs: List<ExerciseLog>): Pair<String, 
             val best = logs.maxByOrNull { it.reps } ?: return null
             "${best.reps} Wdh." to best.date
         }
+        ExerciseKind.CARDIO -> {
+            val best = logs.maxByOrNull { it.seconds } ?: return null
+            "${best.seconds / 60} Min." to best.date
+        }
+        ExerciseKind.AMRAP -> {
+            val best = logs.maxByOrNull { it.reps } ?: return null
+            "${best.reps} Runden" to best.date
+        }
         ExerciseKind.TIMED -> {
             val best = if (ex.targetReps > 1) {
                 logs.maxWithOrNull(compareBy<ExerciseLog> { it.reps }.thenBy { -it.seconds })
@@ -2547,7 +2564,23 @@ private fun TrainingScreen(
     val context = LocalContext.current
     // 0 = Workouts (Hauptfokus), 1 = Uebungen, 2 = Rekorde
     var subPage by remember { mutableIntStateOf(0) }
+    val sessionPrefs = remember { context.getSharedPreferences("nplanner-training-session", Context.MODE_PRIVATE) }
+    var activeWorkoutSessionId by remember { mutableStateOf(sessionPrefs.getString("active_workout", null)) }
+    var sessionStartedAt by remember { mutableStateOf(sessionPrefs.getLong("started_at", 0L)) }
+    var showAddExistingExercise by remember { mutableStateOf(false) }
     var openWorkoutId by remember { mutableStateOf<String?>(null) }
+    fun beginWorkout(id: String) {
+        activeWorkoutSessionId = id
+        sessionStartedAt = System.currentTimeMillis()
+        sessionPrefs.edit().putString("active_workout", id).putLong("started_at", sessionStartedAt).apply()
+        openWorkoutId = id
+    }
+    fun finishWorkout() {
+        activeWorkoutSessionId = null
+        sessionStartedAt = 0L
+        sessionPrefs.edit().remove("active_workout").remove("started_at").apply()
+        openWorkoutId = null
+    }
     var activeExercise by remember { mutableStateOf<Exercise?>(null) }
     var showNewWorkoutDialog by remember { mutableStateOf(false) }
     var editingWorkout by remember { mutableStateOf<Workout?>(null) }
@@ -2608,6 +2641,26 @@ private fun TrainingScreen(
         }
 
         Spacer(Modifier.height(16.dp))
+        activeWorkoutSessionId?.let { id ->
+            val running = workouts.firstOrNull { it.id == id }
+            if (running != null) {
+                Surface(
+                    color = Panel2, shape = RoundedCornerShape(18.dp),
+                    modifier = Modifier.fillMaxWidth().clickable { openWorkoutId = id }
+                ) {
+                    Row(Modifier.padding(14.dp), verticalAlignment = Alignment.CenterVertically) {
+                        Box(Modifier.size(8.dp).background(Red, CircleShape))
+                        Spacer(Modifier.width(12.dp))
+                        Column(Modifier.weight(1f)) {
+                            Text("TRAINING LÄUFT", color = Red, fontSize = 10.sp, fontFamily = FontFamily.Monospace)
+                            Text(running.name, color = White, fontSize = 14.sp)
+                        }
+                        Text("ÖFFNEN ›", color = White, fontSize = 11.sp)
+                    }
+                }
+                Spacer(Modifier.height(12.dp))
+            }
+        }
 
         when (subPage) {
             // ================= UNTERSEITE 0: WORKOUTS (HAUPTFOKUS) =================
@@ -3045,6 +3098,11 @@ private fun TrainingScreen(
                 exercises = workout.exerciseIds.mapNotNull { id -> exercises.find { it.id == id } },
                 logs = logs,
                 onDismiss = { openWorkoutId = null },
+                isActive = activeWorkoutSessionId == workout.id,
+                startedAt = sessionStartedAt,
+                onStartWorkout = { beginWorkout(workout.id) },
+                onFinishWorkout = { finishWorkout() },
+                onAddExistingExercise = { showAddExistingExercise = true },
                 onSelectExercise = { ex ->
                     onHapticTick()
                     activeExercise = ex
@@ -3071,6 +3129,34 @@ private fun TrainingScreen(
         }
     }
 
+    if (showAddExistingExercise) {
+        val current = openWorkoutId?.let { id -> workouts.firstOrNull { it.id == id } }
+        if (current == null) {
+            showAddExistingExercise = false
+        } else {
+            AlertDialog(
+                onDismissRequest = { showAddExistingExercise = false },
+                title = { Text("ÜBUNG HINZUFÜGEN", color = White) },
+                text = {
+                    Column(Modifier.heightIn(max = 360.dp).verticalScroll(rememberScrollState())) {
+                        exercises.filterNot { it.id in current.exerciseIds }.forEach { ex ->
+                            Text(
+                                ex.name,
+                                color = White,
+                                modifier = Modifier.fillMaxWidth().clickable {
+                                    onUpdateWorkout(current.copy(exerciseIds = current.exerciseIds + ex.id))
+                                    showAddExistingExercise = false
+                                }.padding(vertical = 12.dp)
+                            )
+                        }
+                    }
+                },
+                confirmButton = { TextButton(onClick = { showAddExistingExercise = false }) { Text("Schließen") } },
+                containerColor = Panel
+            )
+        }
+    }
+
     if (showNewWorkoutDialog) {
         WorkoutEditorDialog(
             ndot = ndot,
@@ -3091,7 +3177,7 @@ private fun TrainingScreen(
                 )
                 onCreateWorkout(created)
                 showNewWorkoutDialog = false
-                openWorkoutId = created.id
+                beginWorkout(created.id)
             }
         )
     }
@@ -3132,7 +3218,7 @@ private fun TrainingScreen(
                 exercise = freshEx,
                 logs = logs.filter { it.exerciseId == freshEx.id },
                 onDismiss = { activeExercise = null },
-                onLogSet = onLogSet,
+                onLogSet = { log -> onLogSet(log.copy(workoutId = activeWorkoutSessionId.orEmpty())) },
                 onRemoveFromWorkout = activeWorkoutObj?.let { w ->
                     {
                         onUpdateWorkout(w.copy(exerciseIds = w.exerciseIds.filterNot { it == freshEx.id }))
@@ -3186,6 +3272,11 @@ private fun WorkoutSheetDialog(
     logs: List<ExerciseLog>,
     onDismiss: () -> Unit,
     onSelectExercise: (Exercise) -> Unit,
+    isActive: Boolean,
+    startedAt: Long,
+    onStartWorkout: () -> Unit,
+    onFinishWorkout: () -> Unit,
+    onAddExistingExercise: () -> Unit,
     onAddNewExercise: () -> Unit,
     onImportAiExercise: () -> Unit,
     onEditWorkout: () -> Unit,
@@ -3245,12 +3336,31 @@ private fun WorkoutSheetDialog(
 
                 Spacer(Modifier.height(14.dp))
 
+                Surface(
+                    color = if (isActive) Panel2 else White,
+                    shape = RoundedCornerShape(16.dp),
+                    modifier = Modifier.fillMaxWidth().height(48.dp).clickable {
+                        if (isActive) onFinishWorkout() else onStartWorkout()
+                    }
+                ) {
+                    Box(contentAlignment = Alignment.Center) {
+                        Text(if (isActive) "TRAINING BEENDEN" else "WORKOUT STARTEN",
+                            color = if (isActive) White else Bg, fontSize = 13.sp)
+                    }
+                }
+                if (isActive) {
+                    Text("Training gestartet: " + java.text.SimpleDateFormat("HH:mm", Locale.GERMAN).format(java.util.Date(startedAt)),
+                        color = Muted, fontSize = 11.sp, modifier = Modifier.padding(top = 7.dp))
+                }
+                Spacer(Modifier.height(12.dp))
+
                 // Subtile Aktionsleiste fuer neue Uebungen im Workout
                 Row(
                     Modifier.fillMaxWidth(),
                     horizontalArrangement = Arrangement.spacedBy(8.dp)
                 ) {
-                    ChoiceChip("+ Übung", true, Modifier.weight(1f)) { onAddNewExercise() }
+                    ChoiceChip("+ Vorhandene", true, Modifier.weight(1f)) { onAddExistingExercise() }
+                    ChoiceChip("+ Neu", false, Modifier.weight(1f)) { onAddNewExercise() }
                     ChoiceChip("KI / JSON", false, Modifier.weight(1f)) { onImportAiExercise() }
                 }
 
@@ -3475,6 +3585,7 @@ private fun ExerciseDetailDialog(
     var repsText by remember(exercise.id) {
         mutableStateOf((lastLog?.reps?.takeIf { it > 0 } ?: exercise.targetReps).toString())
     }
+    var distanceText by remember(exercise.id) { mutableStateOf((lastLog?.distanceKm ?: 0f).takeIf { it > 0f }?.toString() ?: "") }
     var secondsText by remember(exercise.id) {
         mutableStateOf((lastLog?.seconds?.takeIf { it > 0 } ?: exercise.targetSeconds).toString())
     }
@@ -3546,6 +3657,24 @@ private fun ExerciseDetailDialog(
 
                 SectionLabel("SATZ EINTRAGEN", topPadding = 18.dp, bottomPadding = 10.dp)
                 when (exercise.kind) {
+                    ExerciseKind.CARDIO, ExerciseKind.AMRAP -> {
+                        Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                            OutlinedTextField(secondsText, { secondsText = it.filter(Char::isDigit).take(5) },
+                                label = { Text("Dauer (Sek.)") }, modifier = Modifier.weight(1f),
+                                keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number))
+                            if (exercise.kind == ExerciseKind.CARDIO) {
+                                OutlinedTextField(distanceText, { distanceText = it.take(8) },
+                                    label = { Text("Distanz (km)") }, modifier = Modifier.weight(1f),
+                                    keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Decimal))
+                            }
+                            if (exercise.kind == ExerciseKind.AMRAP) {
+                                OutlinedTextField(repsText, { repsText = it.filter(Char::isDigit).take(4) },
+                                    label = { Text("Runden") }, modifier = Modifier.weight(1f),
+                                    keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number))
+                            }
+                        }
+                    }
+
                     ExerciseKind.WEIGHT -> {
                         Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
                             OutlinedTextField(
@@ -3614,7 +3743,8 @@ private fun ExerciseDetailDialog(
                                     date = today.toString(),
                                     weightKg = if (exercise.kind == ExerciseKind.WEIGHT) w else 0f,
                                     reps = r,
-                                    seconds = if (exercise.kind == ExerciseKind.TIMED) s else 0
+                                    seconds = if (exercise.kind in listOf(ExerciseKind.TIMED, ExerciseKind.CARDIO, ExerciseKind.AMRAP)) s else 0,
+                                    distanceKm = if (exercise.kind == ExerciseKind.CARDIO) distanceText.replace(',', '.').toFloatOrNull()?.coerceIn(0f, 1000f) ?: 0f else 0f
                                 )
                             )
                         },
@@ -3862,21 +3992,53 @@ private fun NewExerciseDialog(
                 }
 
                 SectionLabel("ÜBUNGSTYP", topPadding = 16.dp, bottomPadding = 8.dp)
-                Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                Row(
+                    modifier = Modifier.horizontalScroll(rememberScrollState()),
+                    horizontalArrangement = Arrangement.spacedBy(6.dp)
+                ) {
                     listOf(
                         ExerciseKind.WEIGHT to "Gewicht",
                         ExerciseKind.BODYWEIGHT to "Körpergewicht",
-                        ExerciseKind.TIMED to "Zeit"
+                        ExerciseKind.TIMED to "Zeit",
+                        ExerciseKind.CARDIO to "Cardio",
+                        ExerciseKind.AMRAP to "AMRAP"
                     ).forEach { (k, label) ->
-                        ChoiceChip(label, kind == k, Modifier.weight(1f)) {
+                        ChoiceChip(label, kind == k, Modifier.width(115.dp)) {
                             kind = k
                             triggerHaptic(context, haptic, HapticStyle.TICK)
                         }
                     }
                 }
 
+                if (kind == ExerciseKind.CARDIO) {
+                    SectionLabel("CARDIO-ART", topPadding = 12.dp, bottomPadding = 6.dp)
+                    Row(Modifier.horizontalScroll(rememberScrollState()), horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                        listOf("Laufen", "Radfahren", "Rudern", "Schwimmen", "Gehen", "Crosstrainer", "Seilspringen").forEach { suggestion ->
+                            ChoiceChip(suggestion, name == suggestion, Modifier.width(112.dp)) { name = suggestion }
+                        }
+                    }
+                }
+                if (kind == ExerciseKind.AMRAP) {
+                    TextButton(onClick = {
+                        name = "Cindy"
+                        description = "20 Minuten AMRAP: 5 Klimmzüge, 10 Liegestütze, 15 Kniebeugen pro Runde."
+                        targetSeconds = "1200"
+                        targetReps = "1"
+                    }) { Text("CINDY-VORLAGE (20 MIN.)") }
+                }
                 Spacer(Modifier.height(12.dp))
                 when (kind) {
+                    ExerciseKind.CARDIO, ExerciseKind.AMRAP -> {
+                        OutlinedTextField(targetSeconds, { targetSeconds = it.filter(Char::isDigit).take(5) },
+                            label = { Text("Dauer in Sekunden") }, modifier = Modifier.fillMaxWidth(),
+                            keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number))
+                        if (kind == ExerciseKind.AMRAP) {
+                            OutlinedTextField(targetReps, { targetReps = it.filter(Char::isDigit).take(4) },
+                                label = { Text("Zielrunden") }, modifier = Modifier.fillMaxWidth(),
+                                keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number))
+                        }
+                    }
+
                     ExerciseKind.WEIGHT -> {
                         Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
                             OutlinedTextField(
@@ -4632,7 +4794,7 @@ private fun SetupScreen(
         )
         HorizontalDivider(color = Color(0xFF242424), modifier = Modifier.padding(top = 6.dp))
         Text(
-            "NPLANNER · VERSION 0.24",
+            "NPLANNER · VERSION 0.25",
             color = Color(0xFFB6B6B6),
             fontFamily = FontFamily.Monospace,
             fontSize = 10.sp,
