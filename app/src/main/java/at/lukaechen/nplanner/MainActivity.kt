@@ -6,6 +6,9 @@ import android.content.Context
 import android.content.Intent
 import android.net.Uri
 import android.os.Build
+import androidx.compose.foundation.gestures.scrollBy
+import androidx.compose.ui.layout.onGloballyPositioned
+import androidx.compose.ui.layout.positionInRoot
 import android.os.Bundle
 import android.os.VibrationEffect
 import android.os.Vibrator
@@ -1183,6 +1186,10 @@ class MainActivity : ComponentActivity() {
                                     saveWorkouts(workouts)
                                 }
                                 triggerHaptic(context, haptic, HapticStyle.TASK_DONE)
+                            },
+                            onUpdateExercise = { updated ->
+                                exercises = exercises.map { existing -> if (existing.id == updated.id) updated else existing }
+                                saveExercises(exercises)
                             },
                             onImportExercises = { imported, targetWorkoutId ->
                                 exercises = exercises + imported
@@ -2694,6 +2701,7 @@ private fun TrainingScreen(
     onUpdateWorkout: (Workout) -> Unit,
     onDeleteWorkout: (String) -> Unit,
     onAddExercise: (Exercise, String?) -> Unit,
+    onUpdateExercise: (Exercise) -> Unit,
     onImportExercises: (List<Exercise>, String?) -> Unit,
     onDeleteExercise: (String) -> Unit,
     onLogSet: (ExerciseLog) -> Unit,
@@ -2760,6 +2768,7 @@ private fun TrainingScreen(
         openWorkoutId = null
     }
     var activeExercise by remember { mutableStateOf<Exercise?>(null) }
+    var editingExercise by remember { mutableStateOf<Exercise?>(null) }
     var showNewWorkoutDialog by remember { mutableStateOf(false) }
     var showTemplateManager by remember { mutableStateOf(false) }
     var requestedStandardTemplate by remember { mutableStateOf<String?>(null) }
@@ -3320,11 +3329,9 @@ private fun TrainingScreen(
                     targetWorkoutForNewEx = workout.id
                     showNewExerciseDialog = true
                 },
-                onMoveExercise = { from, to ->
-                    if (from in workout.exerciseIds.indices && to in workout.exerciseIds.indices) {
-                        val ids = workout.exerciseIds.toMutableList()
-                        ids.add(to, ids.removeAt(from))
-                        onUpdateWorkout(workout.copy(exerciseIds = ids))
+                onReorderExercises = { orderedIds ->
+                    if (orderedIds.size == workout.exerciseIds.size && orderedIds.toSet() == workout.exerciseIds.toSet()) {
+                        onUpdateWorkout(workout.copy(exerciseIds = orderedIds))
                     }
                 },
                 onSaveTemplate = {
@@ -3512,6 +3519,7 @@ private fun TrainingScreen(
                         activeExercise = null
                     }
                 },
+                onEditExercise = { editingExercise = freshEx; activeExercise = null },
                 onShareExercise = { shareExercise(freshEx) },
                 onExportExercise = {
                     pendingExerciseExport = exportNpefJson(listOf(freshEx))
@@ -3522,6 +3530,22 @@ private fun TrainingScreen(
                     activeExercise = null
                 },
                 onHapticTick = onHapticTick
+            )
+        }
+    }
+
+    editingExercise?.let { original ->
+        key(original.id) {
+            NewExerciseDialog(
+                ndot = ndot,
+                targetWorkoutName = null,
+                initialExercise = original,
+                onDismiss = { editingExercise = null; activeExercise = original },
+                onCreate = { updated ->
+                    onUpdateExercise(updated)
+                    editingExercise = null
+                    activeExercise = updated
+                }
             )
         }
     }
@@ -3923,6 +3947,172 @@ private fun QuickWorkoutSet(exercise: Exercise, workout: Workout, today: String,
 }
 
 @Composable
+private fun WorkoutExerciseStack(
+    workout: Workout,
+    exercises: List<Exercise>,
+    logs: List<ExerciseLog>,
+    today: String,
+    isActive: Boolean,
+    scrollState: ScrollState,
+    viewportTop: Float,
+    viewportBottom: Float,
+    onReorder: (List<String>) -> Unit,
+    onSelect: (Exercise) -> Unit,
+    onQuickLog: (ExerciseLog) -> Unit
+) {
+    var order by remember(workout.id) { mutableStateOf(exercises.map { it.id }) }
+    var draggedId by remember(workout.id) { mutableStateOf<String?>(null) }
+    var pointerY by remember { mutableFloatStateOf(0f) }
+    var grabOffset by remember { mutableFloatStateOf(0f) }
+    var listTop by remember { mutableFloatStateOf(0f) }
+    var expandedId by remember(workout.id) { mutableStateOf<String?>(null) }
+    val heights = remember(workout.id) { mutableStateMapOf<String, Int>() }
+    val latestExercises by rememberUpdatedState(exercises)
+    val latestReorder by rememberUpdatedState(onReorder)
+    val latestSelect by rememberUpdatedState(onSelect)
+    val density = LocalDensity.current
+    val gap = with(density) { 10.dp.toPx() }
+    val defaultHeight = with(density) { 84.dp.toPx() }
+    val edge = with(density) { 48.dp.toPx() }
+    val latestViewportTop by rememberUpdatedState(viewportTop)
+    val latestViewportBottom by rememberUpdatedState(viewportBottom)
+    val haptic = LocalHapticFeedback.current
+
+    LaunchedEffect(exercises.map { it.id }, draggedId) {
+        if (draggedId == null) order = exercises.map { it.id }
+    }
+    fun topOf(id: String): Float {
+        var y = 0f
+        for (item in order) {
+            if (item == id) return y
+            y += (heights[item]?.toFloat() ?: defaultHeight) + gap
+        }
+        return y
+    }
+    fun moveAtPointer() {
+        val id = draggedId ?: return
+        val from = order.indexOf(id)
+        if (from < 0) return
+        val center = pointerY - listTop - grabOffset + (heights[id]?.toFloat() ?: defaultHeight) / 2f
+        var to = from
+        if (from < order.lastIndex) {
+            val next = order[from + 1]
+            if (center > topOf(next) + (heights[next]?.toFloat() ?: defaultHeight) / 2f) to = from + 1
+        }
+        if (to == from && from > 0) {
+            val previous = order[from - 1]
+            if (center < topOf(previous) + (heights[previous]?.toFloat() ?: defaultHeight) / 2f) to = from - 1
+        }
+        if (to != from) order = order.toMutableList().apply { add(to, removeAt(from)) }
+    }
+    LaunchedEffect(draggedId) {
+        if (draggedId != null) {
+            while (true) {
+                val top = latestViewportTop
+                val bottom = latestViewportBottom
+                val speed = when {
+                    bottom <= top -> 0f
+                    pointerY < top + edge -> -((top + edge - pointerY) / edge).coerceIn(0f, 1f) * 16f
+                    pointerY > bottom - edge -> ((pointerY - bottom + edge) / edge).coerceIn(0f, 1f) * 16f
+                    else -> 0f
+                }
+                if (speed != 0f) {
+                    val moved = scrollState.scrollBy(speed)
+                    // The next layout updates listTop; pointer stays in screen coordinates.
+                    if (moved != 0f) moveAtPointer()
+                }
+                delay(16)
+            }
+        }
+    }
+    Column(Modifier.fillMaxWidth().onGloballyPositioned { listTop = it.positionInRoot().y },
+        verticalArrangement = Arrangement.spacedBy(10.dp)) {
+        order.forEachIndexed { index, id ->
+            val ex = exercises.firstOrNull { it.id == id } ?: return@forEachIndexed
+            key(id) {
+                val dragging = draggedId == id
+                val translation = if (dragging) pointerY - listTop - grabOffset - topOf(id) else 0f
+                val ownLogs = logs.filter { it.workoutId == workout.id && it.exerciseId == id && it.date == today }
+                val lastLog = ownLogs.lastOrNull()
+                val expanded = expandedId == id
+                Surface(
+                    modifier = Modifier.fillMaxWidth().onSizeChanged { heights[id] = it.height }
+                        .zIndex(if (dragging) 1f else 0f)
+                        .graphicsLayer { translationY = translation; scaleX = if (dragging) 1.015f else 1f; scaleY = if (dragging) 1.015f else 1f },
+                    color = if (dragging || expanded) Panel2 else Panel,
+                    shape = RoundedCornerShape(20.dp),
+                    shadowElevation = if (dragging) 8.dp else 0.dp
+                ) {
+                    Column {
+                        Row(
+                            Modifier.fillMaxWidth().pointerInput(id) {
+                                detectDragGesturesAfterLongPress(
+                                    onDragStart = { local ->
+                                        if (draggedId == null) {
+                                            grabOffset = local.y
+                                            pointerY = listTop + topOf(id) + local.y
+                                            draggedId = id
+                                            haptic.performHapticFeedback(androidx.compose.ui.hapticfeedback.HapticFeedbackType.LongPress)
+                                        }
+                                    },
+                                    onDrag = { change, amount ->
+                                        change.consume()
+                                        if (draggedId == id) { pointerY += amount.y; moveAtPointer() }
+                                    },
+                                    onDragEnd = {
+                                        if (draggedId == id) {
+                                            val valid = latestExercises.map { it.id }.toSet()
+                                            val finalOrder = order.filter { it in valid }
+                                            if (finalOrder.size == valid.size) latestReorder(finalOrder)
+                                            draggedId = null
+                                        }
+                                    },
+                                    onDragCancel = { order = latestExercises.map { it.id }; draggedId = null }
+                                )
+                            }.clickable {
+                                if (draggedId == null) expandedId = if (expanded) null else id
+                            }.padding(14.dp),
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            Box(Modifier.size(32.dp), contentAlignment = Alignment.Center) { ExerciseKindIcon(ex.kind) }
+                            Spacer(Modifier.width(10.dp))
+                            Column(Modifier.weight(1f)) {
+                                Text(ex.name, color = White, fontSize = 15.sp, lineHeight = 19.sp)
+                                Text(if (isActive) "${ownLogs.size} Sätze heute" else "${index + 1}. Übung · ${exerciseKindLabel(ex.kind)}",
+                                    color = if (ownLogs.isNotEmpty()) Red else Muted, fontSize = 10.sp)
+                            }
+                            // Six-dot grip, constant dimensions; the entire heading can be held.
+                            Canvas(Modifier.size(18.dp, 24.dp)) {
+                                listOf(.32f,.68f).forEach { x ->
+                                    listOf(.25f,.50f,.75f).forEach { y -> drawCircle(Muted, 1.4.dp.toPx(), Offset(size.width*x,size.height*y)) }
+                                }
+                            }
+                        }
+                        if (expanded) {
+                            Column(Modifier.padding(start = 14.dp, end = 14.dp, bottom = 12.dp)) {
+                                if (isActive && ex.kind in listOf(ExerciseKind.WEIGHT, ExerciseKind.BODYWEIGHT)) {
+                                    QuickWorkoutSet(ex, workout, today, lastLog, onQuickLog)
+                                    ownLogs.forEachIndexed { setIndex, log ->
+                                        Row(Modifier.fillMaxWidth().padding(vertical = 5.dp)) {
+                                            Text("Satz ${setIndex + 1}", color = Muted, fontSize = 11.sp, modifier = Modifier.weight(1f))
+                                            Text(logSummary(ex, log), color = White, fontSize = 12.sp)
+                                        }
+                                    }
+                                } else Text(exerciseSummary(ex), color = Muted, fontSize = 12.sp)
+                                TextButton(onClick = { latestSelect(ex) }, contentPadding = PaddingValues(0.dp)) {
+                                    Text(if (isActive && ex.kind !in listOf(ExerciseKind.WEIGHT, ExerciseKind.BODYWEIGHT)) "Werte eintragen / Details ›" else "Übungsdetails ›",
+                                        color = White, fontSize = 11.sp)
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
+}
+
+@Composable
 private fun WorkoutSheetDialog(
     ndot: FontFamily,
     todayStr: String,
@@ -3938,179 +4128,86 @@ private fun WorkoutSheetDialog(
     onAddExistingExercise: () -> Unit,
     onAddNewExercise: () -> Unit,
     onEditWorkout: () -> Unit,
-    onMoveExercise: (Int, Int) -> Unit,
+    onReorderExercises: (List<String>) -> Unit,
     onSaveTemplate: () -> Unit,
     onQuickLog: (ExerciseLog) -> Unit,
     onDeleteWorkout: () -> Unit
 ) {
-    var sorting by remember { mutableStateOf(false) }
     var confirmDelete by remember { mutableStateOf(false) }
+    var showActions by remember { mutableStateOf(false) }
+    val scroll = rememberScrollState()
+    var viewportTop by remember { mutableFloatStateOf(0f) }
+    var viewportBottom by remember { mutableFloatStateOf(0f) }
+    val maxHeight = androidx.compose.ui.platform.LocalConfiguration.current.screenHeightDp.dp * .88f
+    val todayLogs = logs.filter { it.workoutId == workout.id && it.date == todayStr }
     Dialog(onDismissRequest = onDismiss, properties = DialogProperties(usePlatformDefaultWidth = false)) {
-        Surface(
-            modifier = Modifier
-                .padding(horizontal = 14.dp)
-                .fillMaxWidth(),
-            color = Panel,
-            shape = RoundedCornerShape(28.dp)
-        ) {
-            Column(
-                Modifier
-                    .verticalScroll(rememberScrollState())
-                    .padding(20.dp)
-            ) {
-                Row(
-                    Modifier.fillMaxWidth(),
-                    horizontalArrangement = Arrangement.SpaceBetween,
-                    verticalAlignment = Alignment.CenterVertically
-                ) {
-                    Text(
-                        "WORKOUT · ${exercises.size} ÜBUNGEN",
-                        color = Red,
-                        fontFamily = FontFamily.Monospace,
-                        fontSize = 10.sp,
-                        letterSpacing = 1.5.sp
-                    )
-                    Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
-                        Box(
-                            Modifier
-                                .size(32.dp)
-                                .clip(CircleShape)
-                                .background(Panel2)
-                                .clickable(onClick = onEditWorkout),
-                            contentAlignment = Alignment.Center
-                        ) { WorkoutActionIcon(WorkoutAction.EDIT) }
-                        Box(
-                            Modifier
-                                .size(32.dp)
-                                .clip(CircleShape)
-                                .background(Panel2)
-                                .clickable(onClickLabel = "Workout löschen") { confirmDelete = true },
-                            contentAlignment = Alignment.Center
-                        ) { WorkoutActionIcon(WorkoutAction.DELETE, Red) }
-                    }
-                }
-
-                Spacer(Modifier.height(4.dp))
-                DisplayTitle(workout.name, ndot, fontSize = 24.sp)
-                if (workout.note.isNotBlank()) {
-                    Spacer(Modifier.height(2.dp))
-                    Text(workout.note, color = Muted, fontSize = 12.sp)
-                }
-
-                Spacer(Modifier.height(14.dp))
-
-                Surface(
-                    color = if (isActive) Panel2 else White,
-                    shape = RoundedCornerShape(16.dp),
-                    modifier = Modifier.fillMaxWidth().height(48.dp).clickable {
-                        if (isActive) onFinishWorkout() else onStartWorkout()
-                    }
-                ) {
-                    Box(contentAlignment = Alignment.Center) {
-                        Text(if (isActive) "TRAINING BEENDEN" else "TRAINING STARTEN",
-                            color = if (isActive) White else Bg, fontSize = 13.sp)
-                    }
-                }
-                if (isActive) {
-                    Text("Training gestartet: " + java.text.SimpleDateFormat("HH:mm", Locale.GERMAN).format(java.util.Date(startedAt)),
-                        color = Muted, fontSize = 11.sp, modifier = Modifier.padding(top = 7.dp))
-                }
-                Spacer(Modifier.height(12.dp))
-
-                // Subtile Aktionsleiste fuer neue Uebungen im Workout
-                SectionLabel(if (isActive) "TRAININGSEINHEIT" else "VORBEREITUNG", topPadding = 4.dp, bottomPadding = 8.dp)
-                Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                    ChoiceChip("+ Übung hinzufügen", true, Modifier.weight(1f)) { onAddExistingExercise() }
-                    ChoiceChip("+ Neu", false, Modifier.weight(0.55f)) { onAddNewExercise() }
-                }
-
-                Spacer(Modifier.height(14.dp))
-
-                Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
-                    TextButton(onClick = { sorting = !sorting }) { Text(if (sorting) "Reihenfolge fertig" else "Reihenfolge ändern", color = White, fontSize = 11.sp) }
-                    TextButton(onClick = onSaveTemplate) { Text("Als Vorlage", color = Muted, fontSize = 11.sp) }
-                }
-                if (exercises.isEmpty()) {
-                    Surface(
-                        color = Panel2,
-                        shape = RoundedCornerShape(18.dp),
-                        modifier = Modifier.fillMaxWidth()
-                    ) {
-                        Text(
-                            "Noch keine Übungen vorhanden. Füge Übungen hinzu oder bearbeite die Workout-Vorlage.",
-                            color = Muted,
-                            fontSize = 12.sp,
-                            modifier = Modifier.padding(16.dp)
-                        )
-                    }
-                } else {
-                    Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                        exercises.forEachIndexed { index, ex ->
-                            key(ex.id) {
-                            val exLogs = logs.filter { it.exerciseId == ex.id && it.workoutId == workout.id }
-                            val todaySets = exLogs.count { it.date == todayStr }
-                            val lastLog = exLogs.lastOrNull()
-
-                            Surface(
-                                color = Panel2,
-                                shape = RoundedCornerShape(18.dp),
-                                modifier = Modifier
-                                    .fillMaxWidth()
-                                    .clickable { onSelectExercise(ex) }
-                            ) {
-                                Row(
-                                    Modifier.padding(horizontal = 14.dp, vertical = 12.dp),
-                                    verticalAlignment = Alignment.CenterVertically
-                                ) {
-                                    Box(
-                                        Modifier
-                                            .size(8.dp)
-                                            .background(if (todaySets > 0) Red else Color(0xFF454545), CircleShape)
-                                    )
-                                    Spacer(Modifier.width(12.dp))
-                                    Column(Modifier.weight(1f)) {
-                                        Row(verticalAlignment = Alignment.CenterVertically) {
-                                            Text(
-                                                ex.name,
-                                                color = White,
-                                                fontSize = 15.sp,
-                                                fontWeight = FontWeight.Medium,
-                                                modifier = Modifier.weight(1f, fill = false)
-                                            )
-                                            if (todaySets > 0) {
-                                                Spacer(Modifier.width(8.dp))
-                                                Text(
-                                                    "${todaySets}×",
-                                                    color = Red,
-                                                    fontFamily = FontFamily.Monospace,
-                                                    fontSize = 10.sp
-                                                )
-                                            }
-                                        }
-                                        Spacer(Modifier.height(2.dp))
-                                        Text(
-                                            if (lastLog != null) "Zuletzt: ${logSummary(ex, lastLog)}" else exerciseSummary(ex),
-                                            color = Muted,
-                                            fontSize = 11.sp
-                                        )
-                                    }
-                                    if (sorting) {
-                                        IconButton(onClick = { onMoveExercise(index, index - 1) }, enabled = index > 0) { Text("↑", color = if (index > 0) White else Muted) }
-                                        IconButton(onClick = { onMoveExercise(index, index + 1) }, enabled = index < exercises.lastIndex) { Text("↓", color = if (index < exercises.lastIndex) White else Muted) }
-                                    } else Text("›", color = Muted, fontSize = 20.sp)
-                                }
-                            }
-                            if (!sorting && isActive && ex.kind in listOf(ExerciseKind.WEIGHT, ExerciseKind.BODYWEIGHT)) {
-                                QuickWorkoutSet(ex, workout, todayStr, lastLog, onQuickLog)
-                            }
-                            }
+        Surface(Modifier.fillMaxWidth().padding(horizontal = 14.dp).heightIn(max = maxHeight),
+            color = Bg, shape = RoundedCornerShape(28.dp)) {
+            Column(Modifier.padding(18.dp)) {
+                Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
+                    Box(Modifier.size(7.dp).background(if (isActive) Red else Muted, CircleShape))
+                    Spacer(Modifier.width(8.dp))
+                    Text(if (isActive) "TRAINING LÄUFT" else "VORBEREITUNG", color = if (isActive) Red else Muted,
+                        fontFamily = FontFamily.Monospace, fontSize = 10.sp, letterSpacing = 1.3.sp,
+                        modifier = Modifier.weight(1f))
+                    Box {
+                        IconButton(onClick = { showActions = true }) { Text("⋮", color = White, fontSize = 24.sp) }
+                        DropdownMenu(expanded = showActions, onDismissRequest = { showActions = false }) {
+                            DropdownMenuItem(text = { Text("Workout bearbeiten") }, onClick = { showActions = false; onEditWorkout() })
+                            DropdownMenuItem(text = { Text("Als eigene Vorlage speichern") }, onClick = { showActions = false; onSaveTemplate() })
+                            DropdownMenuItem(text = { Text("Workout löschen", color = Red) },
+                                onClick = { showActions = false; confirmDelete = true })
                         }
                     }
                 }
-
-                Spacer(Modifier.height(14.dp))
-                Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.End) {
-                    TextButton(onClick = onDismiss) { Text("Schließen") }
+                DisplayTitle(workout.name, ndot, fontSize = 25.sp)
+                Text(if (isActive) "${exercises.size} Übungen · ${todayLogs.size} Sätze heute" else "${exercises.size} Übungen · Bereite deine Reihenfolge vor",
+                    color = Muted, fontSize = 12.sp)
+                if (isActive && startedAt > 0L) {
+                    Text("Gestartet um " + java.text.SimpleDateFormat("HH:mm", Locale.GERMAN).format(java.util.Date(startedAt)),
+                        color = Muted, fontSize = 10.sp)
+                }
+                Spacer(Modifier.height(12.dp))
+                Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                    Surface(color = Panel2, shape = RoundedCornerShape(14.dp),
+                        modifier = Modifier.weight(1f).clickable(onClick = onAddExistingExercise)) {
+                        Text("+ Übung hinzufügen", color = White, fontSize = 12.sp, modifier = Modifier.padding(13.dp))
+                    }
+                    Surface(color = Panel2, shape = RoundedCornerShape(14.dp), modifier = Modifier.clickable(onClick = onAddNewExercise)) {
+                        Text("+ Neu", color = White, fontSize = 12.sp, modifier = Modifier.padding(13.dp))
+                    }
+                }
+                Text("Antippen zum Aufklappen · Gedrückt halten und ziehen zum Sortieren",
+                    color = Muted, fontSize = 10.sp, modifier = Modifier.padding(top = 9.dp, bottom = 10.dp))
+                Column(
+                    Modifier.weight(1f, fill = false).fillMaxWidth()
+                        .onGloballyPositioned { coords ->
+                            viewportTop = coords.positionInRoot().y
+                            viewportBottom = viewportTop + coords.size.height
+                        }.verticalScroll(scroll),
+                    verticalArrangement = Arrangement.spacedBy(10.dp)
+                ) {
+                    if (workout.note.isNotBlank()) Text(workout.note, color = Muted, fontSize = 12.sp,
+                        modifier = Modifier.padding(bottom = 4.dp))
+                    if (exercises.isEmpty()) {
+                        Surface(color = Panel, shape = RoundedCornerShape(18.dp), modifier = Modifier.fillMaxWidth()) {
+                            Text("Füge deine erste Übung hinzu. Die Reihenfolge kannst du jederzeit durch Ziehen ändern.",
+                                color = Muted, fontSize = 13.sp, modifier = Modifier.padding(18.dp))
+                        }
+                    } else WorkoutExerciseStack(workout, exercises, logs, todayStr, isActive, scroll,
+                        viewportTop, viewportBottom, onReorderExercises, onSelectExercise, onQuickLog)
+                    Spacer(Modifier.height(2.dp))
+                }
+                Spacer(Modifier.height(12.dp))
+                Button(onClick = { if (isActive) onFinishWorkout() else onStartWorkout() },
+                    enabled = isActive || exercises.isNotEmpty(), modifier = Modifier.fillMaxWidth().height(48.dp),
+                    shape = RoundedCornerShape(16.dp),
+                    colors = ButtonDefaults.buttonColors(containerColor = if (isActive) Panel2 else White,
+                        contentColor = if (isActive) White else Bg)) {
+                    Text(if (isActive) "TRAINING BEENDEN" else "TRAINING STARTEN")
+                }
+                TextButton(onClick = onDismiss, modifier = Modifier.align(Alignment.CenterHorizontally)) {
+                    Text(if (isActive) "Minimieren" else "Schließen", color = Muted)
                 }
             }
         }
@@ -4122,8 +4219,9 @@ private fun WorkoutSheetDialog(
         confirmButton = { TextButton(onClick = { confirmDelete = false; onDeleteWorkout() }) { Text("Löschen", color = Red) } },
         dismissButton = { TextButton(onClick = { confirmDelete = false }) { Text("Abbrechen") } }
     )
-
 }
+
+
 
 private fun savePersonalWorkoutTemplate(context: Context, workout: Workout, exercises: List<Exercise>) {
     val chosen = workout.exerciseIds.mapNotNull { id -> exercises.find { it.id == id }?.let { ex ->
@@ -4263,6 +4361,19 @@ private fun WorkoutTemplateManager(
             text = { Text("Nur die Vorlage wird entfernt. Workouts und Trainingsdaten bleiben erhalten.", color = Muted) },
             confirmButton = { TextButton(onClick = { onDelete(key); deleteKey = null }) { Text("Löschen", color = Red) } },
             dismissButton = { TextButton(onClick = { deleteKey = null }) { Text("Abbrechen") } })
+    }
+}
+
+@Composable
+private fun ExerciseSelectionMark(selected: Boolean) {
+    Canvas(Modifier.size(24.dp)) {
+        val stroke = 1.8.dp.toPx()
+        val center = Offset(size.width / 2f, size.height / 2f)
+        drawCircle(if (selected) White else Muted, size.width * .37f, center, style = Stroke(stroke))
+        if (selected) {
+            drawLine(White, Offset(size.width*.29f,size.height*.50f), Offset(size.width*.44f,size.height*.64f), stroke, StrokeCap.Round)
+            drawLine(White, Offset(size.width*.44f,size.height*.64f), Offset(size.width*.73f,size.height*.35f), stroke, StrokeCap.Round)
+        }
     }
 }
 
@@ -4588,19 +4699,21 @@ private fun WorkoutEditorDialog(
     if (showExercisePicker) {
         AlertDialog(
             onDismissRequest = { showExercisePicker = false },
-            title = { Text("ÜBUNGEN AUSWÄHLEN", color = White) },
+            title = { DisplayTitle("ÜBUNGEN AUSWÄHLEN", ndot, fontSize = 24.sp) },
             text = {
                 Column(Modifier.heightIn(max = 400.dp).verticalScroll(rememberScrollState()),
                     verticalArrangement = Arrangement.spacedBy(6.dp)) {
                     allExercises.forEach { ex ->
                         val included = ex.id in selectedIds
-                        Row(Modifier.fillMaxWidth().clickable {
+                        Row(Modifier.fillMaxWidth().heightIn(min = 52.dp).clickable {
                             selectedIds = if (included) selectedIds - ex.id else selectedIds + ex.id
                             selectedOrder = if (included) selectedOrder - ex.id else selectedOrder + ex.id
                         }.padding(vertical = 10.dp), verticalAlignment = Alignment.CenterVertically) {
-                            Text(if (included) "✓" else "○", color = if (included) Red else Muted, fontSize = 18.sp)
+                            ExerciseSelectionMark(included)
                             Spacer(Modifier.width(12.dp))
-                            Text(ex.name, color = White, fontSize = 14.sp)
+                            Text(ex.name, color = White, fontSize = 14.sp, lineHeight = 20.sp,
+                                modifier = Modifier.weight(1f),
+                                style = TextStyle(platformStyle = PlatformTextStyle(includeFontPadding = false)))
                         }
                     }
                 }
@@ -4623,6 +4736,7 @@ private fun ExerciseDetailDialog(
     canLog: Boolean,
     onRemoveFromWorkout: (() -> Unit)?,
     onDeleteExercise: () -> Unit,
+    onEditExercise: () -> Unit,
     onShareExercise: () -> Unit,
     onExportExercise: () -> Unit,
     onHapticTick: () -> Unit
@@ -4663,8 +4777,8 @@ private fun ExerciseDetailDialog(
                                 onClick = { showExerciseActions = false; onRemoveFromWorkout() })
                         }
                     }
-                    IconButton(onClick = { confirmExerciseDelete = true }) { WorkoutActionIcon(WorkoutAction.DELETE, Muted) }
-                    IconButton(onClick = onDismiss) { Text("✕", color = White, fontSize = 18.sp) }
+                    IconButton(onClick = onEditExercise) { WorkoutActionIcon(WorkoutAction.EDIT) }
+                    IconButton(onClick = { confirmExerciseDelete = true }) { WorkoutActionIcon(WorkoutAction.DELETE, Red) }
                 }
                 DisplayTitle(exercise.name.uppercase(Locale.GERMAN), ndot, fontSize = 26.sp)
                 Text(exercise.muscle + " · " + exerciseKindLabel(exercise.kind), color = Muted, fontSize = 12.sp)
@@ -5061,26 +5175,30 @@ private fun MusclePickerDialog(
 private fun NewExerciseDialog(
     ndot: FontFamily,
     targetWorkoutName: String?,
+    initialExercise: Exercise? = null,
     onDismiss: () -> Unit,
     onCreate: (Exercise) -> Unit
 ) {
     val context = LocalContext.current
     val haptic = LocalHapticFeedback.current
-    var name by remember { mutableStateOf("") }
-    var primaryMuscleId by remember { mutableStateOf("chest") }
-    val secondaryMuscles = remember { mutableStateListOf<String>() }
+    var name by remember { mutableStateOf(initialExercise?.name ?: "") }
+    var primaryMuscleId by remember { mutableStateOf(initialExercise?.primaryMuscleId?.takeIf { it.isNotBlank() }
+        ?: muscleCatalogue.firstOrNull { it.label.equals(initialExercise?.muscle, true) }?.id ?: "chest") }
+    var muscleSelectionChanged by remember { mutableStateOf(false) }
+    val secondaryMuscles = remember { mutableStateListOf<String>().apply { addAll(initialExercise?.secondaryMuscleIds.orEmpty()) } }
     var musclePickerOpen by remember { mutableStateOf(false) }
-    var kind by remember { mutableStateOf(ExerciseKind.WEIGHT) }
-    var description by remember { mutableStateOf("") }
-    var targetWeight by remember { mutableStateOf("40") }
-    var targetReps by remember { mutableStateOf("10") }
-    var targetSeconds by remember { mutableStateOf("45") }
-    var copiedMediaPath by remember { mutableStateOf("") }
-    var mediaUrl by remember { mutableStateOf("") }
-    var mediaUrlIsVideo by remember { mutableStateOf(true) }
+    var kind by remember { mutableStateOf(initialExercise?.kind ?: ExerciseKind.WEIGHT) }
+    var description by remember { mutableStateOf(initialExercise?.description ?: "") }
+    var stepsText by remember { mutableStateOf(initialExercise?.steps?.joinToString("\n") ?: "") }
+    var targetWeight by remember { mutableStateOf((initialExercise?.targetWeightKg ?: 40f).toString()) }
+    var targetReps by remember { mutableStateOf((initialExercise?.targetReps ?: 10).toString()) }
+    var targetSeconds by remember { mutableStateOf((initialExercise?.targetSeconds ?: 45).toString()) }
+    var copiedMediaPath by remember { mutableStateOf(initialExercise?.mediaPath?.takeUnless { validatedMediaUrl(it) != null } ?: "") }
+    var mediaUrl by remember { mutableStateOf(initialExercise?.mediaPath?.takeIf { validatedMediaUrl(it) != null } ?: "") }
+    var mediaUrlIsVideo by remember { mutableStateOf(initialExercise?.mediaIsVideo ?: true) }
     var showExerciseDetails by remember { mutableStateOf(false) }
     var showExerciseMedia by remember { mutableStateOf(false) }
-    var copiedMediaIsVideo by remember { mutableStateOf(false) }
+    var copiedMediaIsVideo by remember { mutableStateOf(initialExercise?.mediaIsVideo ?: false) }
 
     val mediaPicker = rememberLauncherForActivityResult(
         contract = ActivityResultContracts.GetContent()
@@ -5096,6 +5214,7 @@ private fun NewExerciseDialog(
                     dest.outputStream().use { output -> input.copyTo(output) }
                 }
                 copiedMediaPath = dest.absolutePath
+                mediaUrl = ""
                 copiedMediaIsVideo = isVid
                 triggerHaptic(context, haptic, HapticStyle.TASK_DONE)
             }
@@ -5109,7 +5228,7 @@ private fun NewExerciseDialog(
             shape = RoundedCornerShape(28.dp)
         ) {
             Column(Modifier.verticalScroll(rememberScrollState()).padding(22.dp)) {
-                DisplayTitle("NEUE ÜBUNG", ndot, fontSize = 24.sp)
+                DisplayTitle(if (initialExercise == null) "NEUE ÜBUNG" else "ÜBUNG BEARBEITEN", ndot, fontSize = 24.sp)
                 if (!targetWorkoutName.isNullOrBlank()) {
                     Spacer(Modifier.height(4.dp))
                     Text(
@@ -5256,6 +5375,9 @@ private fun NewExerciseDialog(
                       OutlinedTextField(value = description, onValueChange = { description = it.take(400) },
                           label = { Text("Beschreibung & Ausführung") }, minLines = 2, maxLines = 4,
                           modifier = Modifier.fillMaxWidth())
+                      OutlinedTextField(value = stepsText, onValueChange = { stepsText = it.take(4000) },
+                          label = { Text("Ausführungsschritte · eine Zeile pro Schritt") }, minLines = 2, maxLines = 5,
+                          modifier = Modifier.fillMaxWidth())
                   }
                   Spacer(Modifier.height(8.dp))
                   Surface(color = Panel2, shape = RoundedCornerShape(16.dp),
@@ -5308,22 +5430,23 @@ private fun NewExerciseDialog(
                         onClick = {
                             onCreate(
                                 Exercise(
-                                    id = UUID.randomUUID().toString(),
+                                    id = initialExercise?.id ?: UUID.randomUUID().toString(),
                                     name = name.trim(),
-                                    muscle = muscleCatalogue.firstOrNull { it.id == primaryMuscleId }?.category ?: "Ganzkörper",
-                                    primaryMuscleId = primaryMuscleId,
+                                    muscle = if (initialExercise != null && !muscleSelectionChanged) initialExercise.muscle else muscleCatalogue.firstOrNull { it.id == primaryMuscleId }?.category ?: "Ganzkörper",
+                                    primaryMuscleId = if (initialExercise != null && !muscleSelectionChanged) initialExercise.primaryMuscleId else primaryMuscleId,
                                     secondaryMuscleIds = secondaryMuscles.toList(),
                                     kind = kind,
                                     description = description.trim(),
+                                    steps = stepsText.lines().map { it.trim() }.filter { it.isNotBlank() },
                                     mediaPath = mediaUrl.takeIf { it.isNotBlank() }?.trim() ?: copiedMediaPath,
                                     mediaIsVideo = if (mediaUrl.isNotBlank()) mediaUrlIsVideo else copiedMediaIsVideo,
-                                    targetWeightKg = targetWeight.replace(',', '.').toFloatOrNull()?.coerceIn(0f, 500f) ?: 20f,
+                                    targetWeightKg = targetWeight.replace(',', '.').toFloatOrNull()?.takeIf { it.isFinite() }?.coerceIn(0f, 500f) ?: 20f,
                                     targetReps = targetReps.toIntOrNull()?.coerceIn(1, 500) ?: 10,
                                     targetSeconds = targetSeconds.toIntOrNull()?.coerceIn(1, 3600) ?: 45
                                 )
                             )
                         }
-                    ) { Text("Anlegen") }
+                    ) { Text(if (initialExercise == null) "Anlegen" else "Speichern") }
                 }
             }
         }
@@ -5335,6 +5458,7 @@ private fun NewExerciseDialog(
             onDismiss = { musclePickerOpen = false },
             onApply = { primary, secondary ->
                 primaryMuscleId = primary
+                muscleSelectionChanged = true
                 secondaryMuscles.clear()
                 secondaryMuscles.addAll(secondary.filter { it != primary })
                 musclePickerOpen = false
@@ -5975,7 +6099,7 @@ private fun SetupScreen(
         )
         HorizontalDivider(color = Color(0xFF242424), modifier = Modifier.padding(top = 6.dp))
         Text(
-            "NPLANNER · VERSION 0.38",
+            "NPLANNER · VERSION 0.39",
             color = Color(0xFFB6B6B6),
             fontFamily = FontFamily.Monospace,
             fontSize = 10.sp,
