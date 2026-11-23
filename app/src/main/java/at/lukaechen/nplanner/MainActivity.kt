@@ -3903,8 +3903,18 @@ private fun WorkoutEditorDialog(
                             val finalName = name.trim().ifBlank { fallback }
                             val orderedIds = allExercises.filter { it.id in selectedIds }.map { it.id } +
                                 selectedIds.filterNot { id -> allExercises.any { it.id == id } }
-                            onSave(finalName, note.trim(), orderedIds, workoutKind,
-                                if (workoutKind == WorkoutKind.CLASSIC) 0 else (durationText.toIntOrNull() ?: 20).coerceIn(1, 480) * 60)
+                            onSave(
+    finalName,
+    note.trim(),
+    orderedIds,
+    workoutKind,
+    if (workoutKind == WorkoutKind.CLASSIC) {
+        0
+    } else {
+        (durationText.toIntOrNull() ?: 20).coerceIn(1, 480) * 60
+    },
+    selectedPresetTargets.filterKeys { it in selectedIds }
+)
                         }
                     ) { Text(if (isNew) "Erstellen" else "Speichern") }
                 }
