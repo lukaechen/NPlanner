@@ -9,6 +9,8 @@ import android.os.Build
 import androidx.compose.foundation.gestures.scrollBy
 import androidx.compose.ui.layout.onGloballyPositioned
 import androidx.compose.ui.layout.positionInRoot
+import androidx.compose.ui.semantics.contentDescription
+import androidx.compose.ui.semantics.semantics
 import android.os.Bundle
 import android.os.VibrationEffect
 import android.os.Vibrator
@@ -200,7 +202,8 @@ data class ExerciseLog(
     val reps: Int = 0,
     val seconds: Int = 0,
     val workoutId: String = "",
-    val distanceKm: Float = 0f
+    val distanceKm: Float = 0f,
+    val sessionId: String = ""
 )
 
 enum class WorkoutKind { CLASSIC, AMRAP, FOR_TIME, EMOM }
@@ -215,6 +218,27 @@ data class Workout(
     val amrapTargets: Map<String, Int> = emptyMap(),
     val targetWeights: Map<String, Float> = emptyMap()
 )
+
+private fun systemTypography(): Typography {
+    val base = Typography()
+    return Typography(
+        displayLarge = base.displayLarge.copy(fontFamily = FontFamily.Default),
+        displayMedium = base.displayMedium.copy(fontFamily = FontFamily.Default),
+        displaySmall = base.displaySmall.copy(fontFamily = FontFamily.Default),
+        headlineLarge = base.headlineLarge.copy(fontFamily = FontFamily.Default),
+        headlineMedium = base.headlineMedium.copy(fontFamily = FontFamily.Default),
+        headlineSmall = base.headlineSmall.copy(fontFamily = FontFamily.Default),
+        titleLarge = base.titleLarge.copy(fontFamily = FontFamily.Default),
+        titleMedium = base.titleMedium.copy(fontFamily = FontFamily.Default),
+        titleSmall = base.titleSmall.copy(fontFamily = FontFamily.Default),
+        bodyLarge = base.bodyLarge.copy(fontFamily = FontFamily.Default),
+        bodyMedium = base.bodyMedium.copy(fontFamily = FontFamily.Default),
+        bodySmall = base.bodySmall.copy(fontFamily = FontFamily.Default),
+        labelLarge = base.labelLarge.copy(fontFamily = FontFamily.Default),
+        labelMedium = base.labelMedium.copy(fontFamily = FontFamily.Default),
+        labelSmall = base.labelSmall.copy(fontFamily = FontFamily.Default)
+    )
+}
 
 private val LocalDotHeadings = compositionLocalOf { false }
 private val LocalClassicHeadings = compositionLocalOf<FontFamily> { FontFamily.Default }
@@ -727,7 +751,8 @@ class MainActivity : ComponentActivity() {
                 reps = o.optInt("reps", 0),
                 seconds = o.optInt("seconds", 0),
                 workoutId = o.optString("workoutId", ""),
-                distanceKm = o.optDouble("distanceKm", 0.0).toFloat()
+                distanceKm = o.optDouble("distanceKm", 0.0).toFloat(),
+                sessionId = o.optString("sessionId", "")
             )
         }
     } catch (_: Exception) { emptyList() }
@@ -745,6 +770,7 @@ class MainActivity : ComponentActivity() {
                     .put("seconds", log.seconds)
                     .put("workoutId", log.workoutId)
                     .put("distanceKm", log.distanceKm.toDouble())
+                    .put("sessionId", log.sessionId)
             )
         }
         prefs.edit().putString("exercise_logs_v1", arr.toString()).apply()
@@ -836,7 +862,7 @@ class MainActivity : ComponentActivity() {
                     secondary = White,
                     onSecondary = Bg
                 ),
-                typography = Typography()
+                typography = systemTypography()
             ) {
                 CompositionLocalProvider(
                     LocalContentColor provides White,
@@ -1218,9 +1244,33 @@ class MainActivity : ComponentActivity() {
                                 triggerHaptic(context, haptic, HapticStyle.UNDO)
                             },
                             onLogSet = { newLog ->
-                                exerciseLogs = exerciseLogs + newLog
-                                saveExerciseLogs(exerciseLogs)
-                                triggerHaptic(context, haptic, HapticStyle.TASK_DONE)
+                                val session = context.getSharedPreferences("nplanner-training-session", Context.MODE_PRIVATE)
+                                val activeId = session.getString("active_workout", null)
+                                if (newLog.workoutId.isNotBlank() && newLog.workoutId == activeId) {
+                                    val runId = session.getString("classic_run_id", null)
+                                        ?: UUID.randomUUID().toString().also {
+                                            session.edit().putString("classic_run_id", it).apply()
+                                        }
+                                    val saved = newLog.copy(sessionId = runId)
+                                    exerciseLogs = exerciseLogs + saved
+                                    saveExerciseLogs(exerciseLogs)
+                                    exercises = exercises.map { ex ->
+                                        if (ex.id != saved.exerciseId) ex else ex.copy(
+                                            targetWeightKg = if (ex.kind == ExerciseKind.WEIGHT) saved.weightKg else ex.targetWeightKg,
+                                            targetReps = if (saved.reps > 0) saved.reps else ex.targetReps,
+                                            targetSeconds = if (saved.seconds > 0) saved.seconds else ex.targetSeconds
+                                        )
+                                    }
+                                    saveExercises(exercises)
+                                    workouts = workouts.map { w ->
+                                        if (w.id != saved.workoutId) w else w.copy(
+                                            targetWeights = w.targetWeights + (saved.exerciseId to saved.weightKg),
+                                            amrapTargets = if (saved.reps > 0) w.amrapTargets + (saved.exerciseId to saved.reps) else w.amrapTargets
+                                        )
+                                    }
+                                    saveWorkouts(workouts)
+                                    triggerHaptic(context, haptic, HapticStyle.TASK_DONE)
+                                }
                             },
                             onDeleteLog = { logId ->
                                 exerciseLogs = exerciseLogs.filterNot { it.id == logId }
@@ -1388,7 +1438,7 @@ private fun Screen(
         Row(verticalAlignment = Alignment.CenterVertically) {
             Box(Modifier.size(6.dp).background(Red, CircleShape))
             Spacer(Modifier.width(9.dp))
-            Text(eyebrow, color = Muted, fontFamily = FontFamily.Monospace, fontSize = 10.sp, letterSpacing = 1.8.sp)
+            Text(eyebrow, color = Muted, fontFamily = FontFamily.Default, fontSize = 10.sp, letterSpacing = 1.8.sp)
         }
         DisplayTitle(
             text = title,
@@ -1590,7 +1640,7 @@ private fun ProgressBars(done: Int, total: Int, ndot: FontFamily) {
             Text(
                 if (done == total) "GESCHAFFT" else "ERLEDIGT",
                 color = Muted,
-                fontFamily = FontFamily.Monospace,
+                fontFamily = FontFamily.Default,
                 fontSize = 10.sp,
                 letterSpacing = 2.sp,
                 modifier = Modifier.padding(bottom = 6.dp)
@@ -1671,7 +1721,7 @@ private fun ProgressOrbit(
             Text(
                 if (done == total) "GESCHAFFT" else "ERLEDIGT",
                 color = Muted,
-                fontFamily = FontFamily.Monospace,
+                fontFamily = FontFamily.Default,
                 fontSize = 9.sp,
                 letterSpacing = 2.sp
             )
@@ -1771,7 +1821,7 @@ private fun TaskRow(
             Text(
                 chip,
                 color = if (chipHighlight) White else Muted,
-                fontFamily = FontFamily.Monospace,
+                fontFamily = FontFamily.Default,
                 fontSize = 13.sp,
                 modifier = if (chipHighlight)
                     Modifier.clip(RoundedCornerShape(12.dp)).background(Panel2).padding(horizontal = 10.dp, vertical = 6.dp)
@@ -1815,7 +1865,7 @@ private fun StepCounter(
         Text(
             "$clamped / $safeTarget",
             color = if (clamped >= safeTarget) Red else Color.LightGray,
-            fontFamily = FontFamily.Monospace,
+            fontFamily = FontFamily.Default,
             fontSize = 16.sp,
             fontWeight = if (clamped >= safeTarget) FontWeight.Medium else FontWeight.Normal
         )
@@ -2048,14 +2098,14 @@ private fun HistoryScreen(
                         Text(
                             currentMonth.atDay(1).format(DateTimeFormatter.ofPattern("MMMM yyyy", Locale.GERMAN)).uppercase(Locale.GERMAN),
                             color = White,
-                            fontFamily = FontFamily.Monospace,
+                            fontFamily = FontFamily.Default,
                             fontSize = 11.sp,
                             letterSpacing = 1.6.sp
                         )
                         Text(
                             "$perfectDays perfekt · $activeDays aktiv",
                             color = Muted,
-                            fontFamily = FontFamily.Monospace,
+                            fontFamily = FontFamily.Default,
                             fontSize = 10.sp
                         )
                     }
@@ -2068,7 +2118,7 @@ private fun HistoryScreen(
                                 Text(
                                     wd,
                                     color = Muted,
-                                    fontFamily = FontFamily.Monospace,
+                                    fontFamily = FontFamily.Default,
                                     fontSize = 9.sp,
                                     textAlign = TextAlign.Center,
                                     modifier = Modifier.weight(1f)
@@ -2346,7 +2396,7 @@ private fun MonthDayCell(
                 Text(
                     "$dayNum",
                     color = textColor,
-                    fontFamily = FontFamily.Monospace,
+                    fontFamily = FontFamily.Default,
                     fontSize = 12.sp,
                     fontWeight = if (state == DayCompletionState.ALL || isToday) FontWeight.Medium else FontWeight.Normal,
                     style = TextStyle(platformStyle = PlatformTextStyle(includeFontPadding = false))
@@ -2387,14 +2437,14 @@ private fun YearMonthCard(
                 Text(
                     monthName,
                     color = White,
-                    fontFamily = FontFamily.Monospace,
+                    fontFamily = FontFamily.Default,
                     fontSize = 11.sp,
                     letterSpacing = 1.4.sp
                 )
                 Text(
                     "$perfect/${ym.lengthOfMonth()}",
                     color = Muted,
-                    fontFamily = FontFamily.Monospace,
+                    fontFamily = FontFamily.Default,
                     fontSize = 9.sp
                 )
             }
@@ -2451,7 +2501,7 @@ private fun MiniYearStat(
             Row(verticalAlignment = Alignment.CenterVertically) {
                 Box(Modifier.size(5.dp).background(accent, CircleShape))
                 Spacer(Modifier.width(6.dp))
-                Text(label, color = Muted, fontFamily = FontFamily.Monospace, fontSize = 9.sp, letterSpacing = 1.2.sp)
+                Text(label, color = Muted, fontFamily = FontFamily.Default, fontSize = 9.sp, letterSpacing = 1.2.sp)
             }
             Spacer(Modifier.height(6.dp))
             DisplayTitle(value, ndot, fontSize = 24.sp)
@@ -2511,9 +2561,9 @@ private fun DayDetailCard(
                 verticalAlignment = Alignment.CenterVertically
             ) {
                 Column(Modifier.weight(1f)) {
-                    Text(label, color = Muted, fontFamily = FontFamily.Monospace, fontSize = 10.sp, letterSpacing = 1.4.sp)
+                    Text(label, color = Muted, fontFamily = FontFamily.Default, fontSize = 10.sp, letterSpacing = 1.4.sp)
                     Spacer(Modifier.height(4.dp))
-                    Text(statusBadge, color = badgeColor, fontFamily = FontFamily.Monospace, fontSize = 11.sp, letterSpacing = 1.4.sp)
+                    Text(statusBadge, color = badgeColor, fontFamily = FontFamily.Default, fontSize = 11.sp, letterSpacing = 1.4.sp)
                 }
                 DisplayCount(snap.done, snap.total, ndot, 28.sp)
             }
@@ -2554,7 +2604,7 @@ private fun DayDetailCard(
                             Text(
                                 if (isDone) "✓" else "–",
                                 color = if (isDone) Red else Muted,
-                                fontFamily = FontFamily.Monospace,
+                                fontFamily = FontFamily.Default,
                                 fontSize = 12.sp
                             )
                         }
@@ -2569,7 +2619,7 @@ private fun DayDetailCard(
                                 fontSize = 13.sp,
                                 modifier = Modifier.weight(1f)
                             )
-                            Text("✓", color = Red, fontFamily = FontFamily.Monospace, fontSize = 12.sp)
+                            Text("✓", color = Red, fontFamily = FontFamily.Default, fontSize = 12.sp)
                         }
                     }
                 }
@@ -2725,6 +2775,21 @@ private fun TrainingScreen(
             .mapNotNull { runCatching { JSONObject(it.value as String) }.getOrNull() }
             .sortedByDescending { it.optLong("endedAt") }
     }
+    val pastWorkouts = remember(resultRevision, logs, workouts) {
+        val stored = resultPrefs.all.filterKeys { it.startsWith("workout_session:") }.values
+            .mapNotNull { raw -> runCatching { JSONObject(raw as String) }.getOrNull() }
+        val legacy = logs.filter { it.sessionId.isBlank() && it.workoutId.isNotBlank() }
+            .groupBy { it.workoutId to it.date }.mapNotNull { (key, sets) ->
+                val w = workouts.find { it.id == key.first } ?: return@mapNotNull null
+                if (w.kind == WorkoutKind.AMRAP) return@mapNotNull null
+                workoutSessionSnapshot(w, exercises, sets, 0L, 0L, "legacy:${key.first}:${key.second}")
+                    .put("legacyDate", key.second).put("legacy", true)
+            }
+        (stored + legacy).sortedByDescending { obj ->
+            if (obj.optBoolean("legacy")) obj.optString("legacyDate") + " 00:00"
+            else java.text.SimpleDateFormat("yyyy-MM-dd HH:mm:ss", Locale.ROOT).format(java.util.Date(obj.optLong("endedAt")))
+        }
+    }
     val exerciseComparator = remember { java.text.Collator.getInstance(Locale.GERMAN) }
     val visibleExercises = exercises.filter {
         (kindFilter == null || it.kind == kindFilter) && it.name.contains(exerciseQuery, ignoreCase = true)
@@ -2736,10 +2801,23 @@ private fun TrainingScreen(
     val sessionPrefs = remember { context.getSharedPreferences("nplanner-training-session", Context.MODE_PRIVATE) }
     var activeWorkoutSessionId by remember { mutableStateOf(sessionPrefs.getString("active_workout", null)) }
     var sessionStartedAt by remember { mutableStateOf(sessionPrefs.getLong("started_at", 0L)) }
+    var classicRunId by remember {
+        mutableStateOf(sessionPrefs.getString("classic_run_id", null) ?: UUID.randomUUID().toString().also {
+            sessionPrefs.edit().putString("classic_run_id", it).apply()
+        })
+    }
+    var selectedWorkoutResult by remember { mutableStateOf<JSONObject?>(null) }
     var showAddExistingExercise by remember { mutableStateOf(false) }
     var openWorkoutId by remember { mutableStateOf<String?>(null) }
     var amrapWorkoutId by remember { mutableStateOf<String?>(sessionPrefs.getString("amrap_workout", null)) }
     fun beginWorkout(id: String) {
+        if (activeWorkoutSessionId == id) { openWorkoutId = id; return }
+        if (activeWorkoutSessionId != null) {
+            Toast.makeText(context, "Bitte zuerst das laufende Workout beenden.", Toast.LENGTH_SHORT).show()
+            return
+        }
+        classicRunId = UUID.randomUUID().toString()
+        sessionPrefs.edit().putString("classic_run_id", classicRunId).apply()
         activeWorkoutSessionId = id
         sessionStartedAt = System.currentTimeMillis()
         sessionPrefs.edit().putString("active_workout", id).putLong("started_at", sessionStartedAt).apply()
@@ -2760,11 +2838,32 @@ private fun TrainingScreen(
         }
     }
     fun finishWorkout() {
+        val finishedWorkout = workouts.firstOrNull { it.id == activeWorkoutSessionId }
+        if (finishedWorkout != null && finishedWorkout.kind != WorkoutKind.AMRAP && sessionStartedAt > 0L) {
+            val persistedLogs = runCatching {
+                val raw = resultPrefs.getString("exercise_logs_v1", "[]") ?: "[]"
+                val arr = JSONArray(raw)
+                (0 until arr.length()).mapNotNull { i ->
+                    val obj = arr.optJSONObject(i) ?: return@mapNotNull null
+                    if (obj.optString("workoutId") != finishedWorkout.id || obj.optString("sessionId") != classicRunId) return@mapNotNull null
+                    ExerciseLog(id = obj.getString("id"), exerciseId = obj.getString("exerciseId"), date = obj.getString("date"),
+                        weightKg = obj.optDouble("weightKg", 0.0).toFloat(), reps = obj.optInt("reps"),
+                        seconds = obj.optInt("seconds"), workoutId = finishedWorkout.id,
+                        distanceKm = obj.optDouble("distanceKm", 0.0).toFloat(), sessionId = classicRunId)
+                }
+            }.getOrDefault(emptyList())
+            val sets = (logs.filter { it.workoutId == finishedWorkout.id && it.sessionId == classicRunId } + persistedLogs).distinctBy { it.id }
+            val result = workoutSessionSnapshot(finishedWorkout, exercises, sets, sessionStartedAt,
+                System.currentTimeMillis(), classicRunId)
+            resultPrefs.edit().putString("workout_session:$classicRunId", result.toString()).apply()
+            resultRevision++
+            selectedWorkoutResult = result
+        }
         amrapWorkoutId = null
         sessionPrefs.edit().remove("amrap_workout").apply()
         activeWorkoutSessionId = null
         sessionStartedAt = 0L
-        sessionPrefs.edit().remove("active_workout").remove("started_at").apply()
+        sessionPrefs.edit().remove("active_workout").remove("started_at").remove("classic_run_id").apply()
         openWorkoutId = null
     }
     var activeExercise by remember { mutableStateOf<Exercise?>(null) }
@@ -2803,7 +2902,6 @@ private fun TrainingScreen(
     var targetWorkoutForNewEx by remember { mutableStateOf<String?>(null) }
 
     val todayStr = today.toString()
-    val todayLogs = remember(logs, todayStr) { logs.filter { it.date == todayStr } }
 
     fun shareAiPromptToExternalApp() {
         onHapticTick()
@@ -2827,7 +2925,7 @@ private fun TrainingScreen(
         ndot = ndot,
         eyebrow = "WORKOUTS & PROGRESSION.",
         title = "TRAINING",
-        subtitle = "${workouts.size} ${if (workouts.size == 1) "Workout" else "Workouts"} · ${todayLogs.size} Sätze heute"
+        subtitle = "${if (activeWorkoutSessionId != null) "1 aktives Workout" else "Kein aktives Workout"} · ${pastWorkouts.size + amrapResults.size} vergangene Einheiten"
     ) {
         // Subtile Unterseiten-Navigation: Workouts | Übungen | Rekorde
         Row(
@@ -2866,7 +2964,7 @@ private fun TrainingScreen(
                         Box(Modifier.size(8.dp).background(Red, CircleShape))
                         Spacer(Modifier.width(12.dp))
                         Column(Modifier.weight(1f)) {
-                            Text("TRAINING LÄUFT", color = Red, fontSize = 10.sp, fontFamily = FontFamily.Monospace)
+                            Text("TRAINING LÄUFT", color = Red, fontSize = 10.sp, fontFamily = FontFamily.Default)
                             Text(running.name, color = White, fontSize = 14.sp)
                         }
                         Text("ÖFFNEN ›", color = White, fontSize = 11.sp)
@@ -2879,21 +2977,38 @@ private fun TrainingScreen(
         when (subPage) {
             // ================= UNTERSEITE 0: WORKOUTS (HAUPTFOKUS) =================
             0 -> {
+                SectionLabel("VERGANGENE WORKOUTS", topPadding = 22.dp, bottomPadding = 10.dp)
+                if (pastWorkouts.isEmpty()) Text("Abgeschlossene Workouts erscheinen hier.", color = Muted, fontSize = 12.sp)
+                pastWorkouts.forEach { result ->
+                    Surface(color = Panel, shape = RoundedCornerShape(20.dp),
+                        modifier = Modifier.fillMaxWidth().padding(vertical = 4.dp).clickable { selectedWorkoutResult = result }) {
+                        Row(Modifier.padding(15.dp), verticalAlignment = Alignment.CenterVertically) {
+                            Column(Modifier.weight(1f)) {
+                                Text(result.optString("name"), color = White, fontSize = 15.sp)
+                                Text(if (result.optBoolean("legacy")) result.optString("legacyDate") + " · ältere Tagesaufzeichnung"
+                                    else java.text.SimpleDateFormat("dd.MM.yyyy HH:mm", Locale.GERMAN).format(java.util.Date(result.optLong("endedAt"))),
+                                    color = Muted, fontSize = 11.sp)
+                            }
+                            Text("${result.optInt("setCount")} Sätze  ›", color = White, fontSize = 12.sp)
+                        }
+                    }
+                }
+                Spacer(Modifier.height(18.dp))
                 Row(
                     Modifier.fillMaxWidth(),
                     verticalAlignment = Alignment.CenterVertically,
                     horizontalArrangement = Arrangement.SpaceBetween
                 ) {
                     Text(
-                        "DEINE WORKOUTS",
+                        "WORKOUTS",
                         color = Muted,
-                        fontFamily = FontFamily.Monospace,
+                        fontFamily = FontFamily.Default,
                         fontSize = 10.sp,
                         letterSpacing = 1.6.sp
                     )
                     Row(verticalAlignment = Alignment.CenterVertically) {
                         TextButton(onClick = { showTemplateManager = true }) {
-                            Text("VORLAGEN", color = Muted, fontSize = 10.sp, fontFamily = FontFamily.Monospace)
+                            Text("VORLAGEN", color = Muted, fontSize = 10.sp, fontFamily = FontFamily.Default)
                         }
                     TextButton(onClick = {
                         onHapticTick()
@@ -2901,12 +3016,12 @@ private fun TrainingScreen(
                         requestedPersonalTemplate = null
                         showNewWorkoutDialog = true
                     }) {
-                        Text("+ WORKOUT", color = White, fontFamily = FontFamily.Monospace, fontSize = 11.sp, letterSpacing = 1.4.sp)
+                        Text("+ WORKOUT", color = White, fontFamily = FontFamily.Default, fontSize = 11.sp, letterSpacing = 1.4.sp)
                     }
                     }
                 }
 
-                if (workouts.none { it.kind != WorkoutKind.AMRAP }) {
+                if (workouts.none { it.kind != WorkoutKind.AMRAP && it.id != activeWorkoutSessionId }) {
                     Surface(
                         color = Panel,
                         shape = RoundedCornerShape(24.dp),
@@ -2938,7 +3053,7 @@ private fun TrainingScreen(
                                 Text(
                                     "+ WORKOUT ANLEGEN",
                                     color = Bg,
-                                    fontFamily = FontFamily.Monospace,
+                                    fontFamily = FontFamily.Default,
                                     fontSize = 11.sp,
                                     fontWeight = FontWeight.Medium,
                                     letterSpacing = 1.2.sp
@@ -2948,9 +3063,9 @@ private fun TrainingScreen(
                     }
                 } else {
                     Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
-                        workouts.filter { it.kind != WorkoutKind.AMRAP }.forEach { workout ->
+                        workouts.filter { it.kind != WorkoutKind.AMRAP && it.id != activeWorkoutSessionId }.forEach { workout ->
                             val wExercises = workout.exerciseIds.mapNotNull { id -> exercises.find { it.id == id } }
-                            val todaySetsInWorkout = todayLogs.count { it.exerciseId in workout.exerciseIds }
+                            val isThisWorkoutActive = activeWorkoutSessionId == workout.id
 
                             Surface(
                                 color = Panel,
@@ -2970,7 +3085,7 @@ private fun TrainingScreen(
                                     Box(
                                         Modifier
                                             .size(8.dp)
-                                            .background(if (todaySetsInWorkout > 0) Red else Color(0xFF3A3A3A), CircleShape)
+                                            .background(if (isThisWorkoutActive) Red else Color(0xFF3A3A3A), CircleShape)
                                     )
                                     Spacer(Modifier.width(14.dp))
                                     Column(Modifier.weight(1f)) {
@@ -2982,16 +3097,7 @@ private fun TrainingScreen(
                                                 fontWeight = FontWeight.Medium,
                                                 modifier = Modifier.weight(1f, fill = false)
                                             )
-                                            if (todaySetsInWorkout > 0) {
-                                                Spacer(Modifier.width(8.dp))
-                                                Text(
-                                                    "${todaySetsInWorkout}× HEUTE",
-                                                    color = Red,
-                                                    fontFamily = FontFamily.Monospace,
-                                                    fontSize = 9.sp,
-                                                    letterSpacing = 1.sp
-                                                )
-                                            }
+                                            
                                         }
                                         Spacer(Modifier.height(4.dp))
                                         val previewNames = if (wExercises.isEmpty()) {
@@ -3011,7 +3117,7 @@ private fun TrainingScreen(
                                     Text(
                                         "${wExercises.size}",
                                         color = Muted,
-                                        fontFamily = FontFamily.Monospace,
+                                        fontFamily = FontFamily.Default,
                                         fontSize = 12.sp
                                     )
                                     Spacer(Modifier.width(6.dp))
@@ -3022,46 +3128,6 @@ private fun TrainingScreen(
                     }
                 }
 
-                if (todayLogs.isNotEmpty()) {
-                    SectionLabel("HEUTE GELOCKT", topPadding = 22.dp, bottomPadding = 10.dp)
-                    Surface(color = Panel, shape = RoundedCornerShape(24.dp), modifier = Modifier.fillMaxWidth()) {
-                        Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
-                            todayLogs.asReversed().forEachIndexed { idx, log ->
-                                val ex = exercises.find { it.id == log.exerciseId }
-                                if (ex != null) {
-                                    Row(
-                                        Modifier.fillMaxWidth(),
-                                        verticalAlignment = Alignment.CenterVertically
-                                    ) {
-                                        Box(Modifier.size(6.dp).background(Red, CircleShape))
-                                        Spacer(Modifier.width(10.dp))
-                                        Column(Modifier.weight(1f)) {
-                                            Text(ex.name, color = White, fontSize = 14.sp)
-                                            Text(
-                                                logSummary(ex, log),
-                                                color = Muted,
-                                                fontFamily = FontFamily.Monospace,
-                                                fontSize = 11.sp
-                                            )
-                                        }
-                                        Box(
-                                            Modifier
-                                                .size(30.dp)
-                                                .clip(CircleShape)
-                                                .clickable { onDeleteLog(log.id) },
-                                            contentAlignment = Alignment.Center
-                                        ) {
-                                            WorkoutActionIcon(WorkoutAction.DELETE, Muted)
-                                        }
-                                    }
-                                    if (idx < todayLogs.lastIndex) {
-                                        HorizontalDivider(color = Color(0xFF282828))
-                                    }
-                                }
-                            }
-                        }
-                    }
-                }
                 if (amrapResults.isNotEmpty()) {
                     SectionLabel("AMRAP-VERLAUF", topPadding = 20.dp, bottomPadding = 10.dp)
                     amrapResults.forEach { result ->
@@ -3089,7 +3155,7 @@ private fun TrainingScreen(
                 Text("${visibleExercises.size} ÜBUNGEN · " +
                     (if (groupExercises) "NACH ART" else "ALLE ARTEN") + " · " +
                     (if (exerciseDescending) "Z–A" else "A–Z"),
-                    color = Muted, fontFamily = FontFamily.Monospace, fontSize = 10.sp,
+                    color = Muted, fontFamily = FontFamily.Default, fontSize = 10.sp,
                     modifier = Modifier.padding(top = 8.dp, bottom = 10.dp))
                 Row(
                     Modifier.fillMaxWidth(),
@@ -3111,7 +3177,7 @@ private fun TrainingScreen(
                             Text(
                                 "+ ÜBUNG",
                                 color = Bg,
-                                fontFamily = FontFamily.Monospace,
+                                fontFamily = FontFamily.Default,
                                 fontSize = 11.sp,
                                 fontWeight = FontWeight.Medium,
                                 letterSpacing = 1.1.sp
@@ -3137,7 +3203,7 @@ private fun TrainingScreen(
                             Text(
                                 "MIT KI ANLEGEN",
                                 color = White,
-                                fontFamily = FontFamily.Monospace,
+                                fontFamily = FontFamily.Default,
                                 fontSize = 10.sp,
                                 letterSpacing = 1.sp,
                                 maxLines = 1
@@ -3200,7 +3266,7 @@ private fun TrainingScreen(
                                             Text(
                                                 "Zuletzt: ${logSummary(ex, lastLog)}",
                                                 color = Color(0xFFB4B4B0),
-                                                fontFamily = FontFamily.Monospace,
+                                                fontFamily = FontFamily.Default,
                                                 fontSize = 10.sp
                                             )
                                         }
@@ -3228,7 +3294,7 @@ private fun TrainingScreen(
                             Row(verticalAlignment = Alignment.CenterVertically) {
                                 Box(Modifier.size(6.dp).background(Red, CircleShape))
                                 Spacer(Modifier.width(7.dp))
-                                Text("REKORDE", color = Muted, fontFamily = FontFamily.Monospace, fontSize = 9.sp, letterSpacing = 1.4.sp)
+                                Text("REKORDE", color = Muted, fontFamily = FontFamily.Default, fontSize = 9.sp, letterSpacing = 1.4.sp)
                             }
                             Spacer(Modifier.height(8.dp))
                             DisplayTitle("${records.size + amrapResults.map { it.optString("signature") }.distinct().size}", ndot, fontSize = 32.sp)
@@ -3239,7 +3305,7 @@ private fun TrainingScreen(
                             Row(verticalAlignment = Alignment.CenterVertically) {
                                 Box(Modifier.size(6.dp).background(White, CircleShape))
                                 Spacer(Modifier.width(7.dp))
-                                Text("SÄTZE GESAMT", color = Muted, fontFamily = FontFamily.Monospace, fontSize = 9.sp, letterSpacing = 1.4.sp)
+                                Text("SÄTZE GESAMT", color = Muted, fontFamily = FontFamily.Default, fontSize = 9.sp, letterSpacing = 1.4.sp)
                             }
                             Spacer(Modifier.height(8.dp))
                             DisplayTitle("${logs.size}", ndot, fontSize = 32.sp)
@@ -3266,9 +3332,9 @@ private fun TrainingScreen(
                                     Spacer(Modifier.width(12.dp))
                                     Column(Modifier.weight(1f)) {
                                         Text(ex.name, color = White, fontSize = 15.sp)
-                                        Text(day, color = Muted, fontSize = 10.sp, fontFamily = FontFamily.Monospace)
+                                        Text(day, color = Muted, fontSize = 10.sp, fontFamily = FontFamily.Default)
                                     }
-                                    Text(value, color = Red, fontSize = 14.sp, fontFamily = FontFamily.Monospace)
+                                    Text(value, color = Red, fontSize = 14.sp, fontFamily = FontFamily.Default)
                                 }
                             }
                         }
@@ -3286,6 +3352,10 @@ private fun TrainingScreen(
     }
 
     // Subtiles Overlay-Dialog-Fenster fuer das geoeffnete Workout (hier erscheinen die Uebungen)
+    selectedWorkoutResult?.let { result ->
+        WorkoutSessionSummary(result, ndot) { selectedWorkoutResult = null }
+    }
+
     selectedAmrapResult?.let { result ->
         AmrapSummaryDialog(result, ndot) { selectedAmrapResult = null }
     }
@@ -3316,6 +3386,7 @@ private fun TrainingScreen(
                 onDismiss = { openWorkoutId = null },
                 isActive = activeWorkoutSessionId == workout.id,
                 startedAt = sessionStartedAt,
+                sessionId = classicRunId,
                 onStartWorkout = { beginWorkout(workout.id) },
                 onFinishWorkout = { finishWorkout() },
                 onAddExistingExercise = { showAddExistingExercise = true },
@@ -3351,6 +3422,7 @@ private fun TrainingScreen(
                     editingWorkout = workout
                 },
                 onDeleteWorkout = {
+                    if (activeWorkoutSessionId == workout.id) finishWorkout()
                     onDeleteWorkout(workout.id)
                     openWorkoutId = null
                 }
@@ -3430,7 +3502,11 @@ private fun TrainingScreen(
             isNew = true,
             onAddPresetExercises = { missing -> onImportExercises(missing, null) },
             onDismiss = { showNewWorkoutDialog = false },
-            onSave = { finalName, note, selectedIds, kind, durationSeconds, targets, weights ->
+            onSave = createWorkout@ { finalName, note, selectedIds, kind, durationSeconds, targets, weights ->
+                if (kind == WorkoutKind.AMRAP && activeWorkoutSessionId != null) {
+                    Toast.makeText(context, "Bitte zuerst das laufende Workout beenden.", Toast.LENGTH_SHORT).show()
+                    return@createWorkout
+                }
                 val created = Workout(
                     id = UUID.randomUUID().toString(),
                     name = finalName,
@@ -3500,8 +3576,8 @@ private fun TrainingScreen(
                 ndot = ndot,
                 today = today,
                 exercise = freshEx.copy(
-                    targetWeightKg = activeWorkoutObj?.targetWeights?.get(freshEx.id) ?: freshEx.targetWeightKg,
-                    targetReps = activeWorkoutObj?.amrapTargets?.get(freshEx.id) ?: freshEx.targetReps
+                    targetWeightKg = logs.lastOrNull { it.exerciseId == freshEx.id }?.weightKg ?: freshEx.targetWeightKg,
+                    targetReps = logs.lastOrNull { it.exerciseId == freshEx.id && it.reps > 0 }?.reps ?: freshEx.targetReps
                 ),
                 logs = logs.filter { it.exerciseId == freshEx.id },
                 onDismiss = { activeExercise = null },
@@ -3570,7 +3646,7 @@ private fun TrainingScreen(
             title = { DisplayTitle("FILTER", ndot, fontSize = 25.sp) },
             text = {
                 Column {
-                    Text("ÜBUNGSART", color = Muted, fontSize = 10.sp, fontFamily = FontFamily.Monospace)
+                    Text("ÜBUNGSART", color = Muted, fontSize = 10.sp, fontFamily = FontFamily.Default)
                     Spacer(Modifier.height(8.dp))
                     Column(Modifier.heightIn(max = 235.dp).verticalScroll(rememberScrollState())) {
                         (listOf<ExerciseKind?>(null) + ExerciseKind.values().toList()).forEach { kind ->
@@ -3667,20 +3743,20 @@ private fun AmrapSummaryDialog(result: JSONObject, ndot: FontFamily, onClose: ()
                 Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
                     Box(Modifier.size(7.dp).background(Red, CircleShape))
                     Spacer(Modifier.width(9.dp))
-                    Text("TRAININGSERGEBNIS", color = Muted, fontFamily = FontFamily.Monospace,
+                    Text("TRAININGSERGEBNIS", color = Muted, fontFamily = FontFamily.Default,
                         fontSize = 10.sp, letterSpacing = 1.4.sp, modifier = Modifier.weight(1f))
                     TextButton(onClick = onClose) { Text("✕", color = White) }
                 }
                 DisplayTitle(result.optString("name").uppercase(Locale.GERMAN), ndot, fontSize = 26.sp)
                 Text(if (completed) "ZEIT ABGELAUFEN · GESPEICHERT" else "VORZEITIG BEENDET · GESPEICHERT",
                     color = if (completed) Red else Muted, fontSize = 10.sp,
-                    fontFamily = FontFamily.Monospace)
+                    fontFamily = FontFamily.Default)
                 Spacer(Modifier.height(18.dp))
                 Surface(color = Panel2, shape = RoundedCornerShape(22.dp), modifier = Modifier.fillMaxWidth()) {
                     Column(Modifier.padding(18.dp), horizontalAlignment = Alignment.CenterHorizontally) {
                         DisplayTitle("${result.optInt("rounds")}", ndot, fontSize = 54.sp)
                         Text("VOLLSTÄNDIGE RUNDEN", color = Muted, fontSize = 10.sp,
-                            fontFamily = FontFamily.Monospace)
+                            fontFamily = FontFamily.Default)
                         if (result.optInt("extraExercises") > 0) {
                             Text("+ ${result.optInt("extraExercises")} Übungen der nächsten Runde", color = White,
                                 fontSize = 13.sp, modifier = Modifier.padding(top = 8.dp))
@@ -3715,7 +3791,7 @@ private fun AmrapSummaryDialog(result: JSONObject, ndot: FontFamily, onClose: ()
                             Text("${item.optInt("target")} pro Runde", color = Muted, fontSize = 10.sp)
                         }
                         Text("${item.optInt("totalReps")}", color = White, fontSize = 17.sp,
-                            fontFamily = FontFamily.Monospace)
+                            fontFamily = FontFamily.Default)
                     }
                     if (i < items.length() - 1) HorizontalDivider(color = Color(0xFF303030))
                 }
@@ -3920,6 +3996,92 @@ private fun AmrapLiveDialog(
 }
 
 @Composable
+private fun WorkoutInfoIcon() {
+    Canvas(Modifier.size(19.dp)) {
+        val stroke = 1.6.dp.toPx()
+        drawCircle(Muted, size.width*.40f, style = Stroke(stroke))
+        drawCircle(Muted, size.width*.045f, Offset(size.width*.50f,size.height*.31f))
+        drawLine(Muted, Offset(size.width*.50f,size.height*.47f), Offset(size.width*.50f,size.height*.70f), stroke, StrokeCap.Round)
+    }
+}
+
+@Composable
+private fun WorkoutTemplateIcon() {
+    Canvas(Modifier.size(20.dp)) {
+        val stroke = 1.7.dp.toPx()
+        val w = size.width; val h = size.height
+        val bookmark = Path().apply {
+            moveTo(w*.25f,h*.14f); lineTo(w*.75f,h*.14f)
+            lineTo(w*.75f,h*.88f); lineTo(w*.50f,h*.70f)
+            lineTo(w*.25f,h*.88f); close()
+        }
+        drawPath(bookmark, White, style = Stroke(stroke, cap = StrokeCap.Round, join = StrokeJoin.Round))
+    }
+}
+
+private fun workoutSessionSnapshot(
+    workout: Workout, exercises: List<Exercise>, logs: List<ExerciseLog>,
+    startedAt: Long, endedAt: Long, runId: String
+): JSONObject {
+    val items = JSONArray()
+    val ids = (workout.exerciseIds + logs.map { it.exerciseId }).distinct()
+    ids.forEach { id ->
+        val ex = exercises.find { it.id == id }
+        val sets = logs.filter { it.exerciseId == id }
+        if (sets.isNotEmpty()) {
+            val entries = JSONArray()
+            sets.forEach { log -> entries.put(JSONObject().put("weightKg", log.weightKg.toDouble())
+                .put("reps", log.reps).put("seconds", log.seconds).put("distanceKm", log.distanceKm.toDouble())) }
+            items.put(JSONObject().put("name", ex?.name ?: "Entfernte Übung")
+                .put("kind", ex?.kind?.name ?: "WEIGHT").put("sets", entries))
+        }
+    }
+    return JSONObject().put("runId", runId).put("workoutId", workout.id).put("name", workout.name)
+        .put("startedAt", startedAt).put("endedAt", endedAt).put("setCount", logs.size)
+        .put("items", items).put("elapsedMs", if (startedAt > 0L && endedAt >= startedAt) endedAt - startedAt else 0L)
+}
+
+@Composable
+private fun WorkoutSessionSummary(result: JSONObject, ndot: FontFamily, onClose: () -> Unit) {
+    Dialog(onDismissRequest = onClose, properties = DialogProperties(usePlatformDefaultWidth = false)) {
+        Surface(Modifier.fillMaxWidth().padding(16.dp), color = Panel, shape = RoundedCornerShape(28.dp)) {
+            Column(Modifier.padding(20.dp).heightIn(max = 570.dp).verticalScroll(rememberScrollState())) {
+                Text("ABGESCHLOSSENES WORKOUT", color = Red, fontSize = 10.sp)
+                Spacer(Modifier.height(6.dp))
+                DisplayTitle(result.optString("name"), ndot, fontSize = 26.sp)
+                Text("${result.optInt("setCount")} Sätze" + if (result.optBoolean("legacy"))
+                    " · ${result.optString("legacyDate")} · ältere Tagesaufzeichnung"
+                    else " · ${result.optLong("elapsedMs") / 60000} Min.", color = Muted, fontSize = 12.sp)
+                if (result.optBoolean("legacy")) Text("Frühere Einheiten wurden nur nach Tag und Workout gespeichert. Eine genaue Sitzungsdauer ist nicht verfügbar.",
+                    color = Muted, fontSize = 11.sp, modifier = Modifier.padding(top = 8.dp))
+                val items = result.optJSONArray("items") ?: JSONArray()
+                if (items.length() == 0) Text("Keine Sätze erfasst.", color = Muted, modifier = Modifier.padding(top = 14.dp))
+                for (i in 0 until items.length()) {
+                    val item = items.getJSONObject(i)
+                    SectionLabel(item.optString("name").uppercase(Locale.GERMAN), topPadding = 18.dp, bottomPadding = 8.dp)
+                    val sets = item.optJSONArray("sets") ?: JSONArray()
+                    val kind = runCatching { ExerciseKind.valueOf(item.optString("kind")) }.getOrDefault(ExerciseKind.WEIGHT)
+                    for (j in 0 until sets.length()) {
+                        val set = sets.getJSONObject(j)
+                        val text = when (kind) {
+                            ExerciseKind.WEIGHT -> "${fmtKg(set.optDouble("weightKg").toFloat())} × ${set.optInt("reps")}"
+                            ExerciseKind.BODYWEIGHT -> "${set.optInt("reps")} Wiederholungen"
+                            ExerciseKind.CARDIO -> "${set.optInt("seconds") / 60} Min. · ${set.optDouble("distanceKm")} km"
+                            ExerciseKind.TIMED, ExerciseKind.AMRAP -> "${set.optInt("seconds")} Sekunden"
+                        }
+                        Row(Modifier.fillMaxWidth().padding(vertical = 6.dp)) {
+                            Text("Satz ${j + 1}", color = Muted, fontSize = 12.sp, modifier = Modifier.weight(1f))
+                            Text(text, color = White, fontSize = 13.sp)
+                        }
+                    }
+                }
+                TextButton(onClick = onClose, modifier = Modifier.align(Alignment.End)) { Text("Schließen", color = White) }
+            }
+        }
+    }
+}
+
+@Composable
 private fun QuickWorkoutSet(exercise: Exercise, workout: Workout, today: String, lastLog: ExerciseLog?, onSave: (ExerciseLog) -> Unit) {
     var weight by remember(exercise.id, workout.id) { mutableStateOf(
         (lastLog?.weightKg ?: workout.targetWeights[exercise.id] ?: exercise.targetWeightKg).toString()) }
@@ -3953,6 +4115,7 @@ private fun WorkoutExerciseStack(
     logs: List<ExerciseLog>,
     today: String,
     isActive: Boolean,
+    sessionId: String,
     scrollState: ScrollState,
     viewportTop: Float,
     viewportBottom: Float,
@@ -4032,8 +4195,8 @@ private fun WorkoutExerciseStack(
             key(id) {
                 val dragging = draggedId == id
                 val translation = if (dragging) pointerY - listTop - grabOffset - topOf(id) else 0f
-                val ownLogs = logs.filter { it.workoutId == workout.id && it.exerciseId == id && it.date == today }
-                val lastLog = ownLogs.lastOrNull()
+                val ownLogs = logs.filter { it.workoutId == workout.id && it.exerciseId == id && it.sessionId == sessionId }
+                val lastLog = logs.lastOrNull { it.exerciseId == id }
                 val expanded = expandedId == id
                 Surface(
                     modifier = Modifier.fillMaxWidth().onSizeChanged { heights[id] = it.height }
@@ -4078,14 +4241,19 @@ private fun WorkoutExerciseStack(
                             Spacer(Modifier.width(10.dp))
                             Column(Modifier.weight(1f)) {
                                 Text(ex.name, color = White, fontSize = 15.sp, lineHeight = 19.sp)
-                                Text(if (isActive) "${ownLogs.size} Sätze heute" else "${index + 1}. Übung · ${exerciseKindLabel(ex.kind)}",
+                                Text(if (isActive) "${ownLogs.size} Sätze in dieser Einheit" else "${index + 1}. Übung · ${exerciseKindLabel(ex.kind)}",
                                     color = if (ownLogs.isNotEmpty()) Red else Muted, fontSize = 10.sp)
                             }
-                            // Six-dot grip, constant dimensions; the entire heading can be held.
-                            Canvas(Modifier.size(18.dp, 24.dp)) {
-                                listOf(.32f,.68f).forEach { x ->
-                                    listOf(.25f,.50f,.75f).forEach { y -> drawCircle(Muted, 1.4.dp.toPx(), Offset(size.width*x,size.height*y)) }
+                            IconButton(onClick = { latestSelect(ex) }, modifier = Modifier.semantics { contentDescription = "Übungsinformationen" }) { WorkoutInfoIcon() }
+                            val arrowRotation by animateFloatAsState(if (expanded) 180f else 0f,
+                                animationSpec = tween(160), label = "exerciseChevron")
+                            Canvas(Modifier.size(20.dp).graphicsLayer { rotationZ = arrowRotation }) {
+                                val path = Path().apply {
+                                    moveTo(size.width*.22f,size.height*.38f)
+                                    lineTo(size.width*.50f,size.height*.66f)
+                                    lineTo(size.width*.78f,size.height*.38f)
                                 }
+                                drawPath(path, White, style = Stroke(1.8.dp.toPx(), cap = StrokeCap.Round, join = StrokeJoin.Round))
                             }
                         }
                         if (expanded) {
@@ -4099,9 +4267,10 @@ private fun WorkoutExerciseStack(
                                         }
                                     }
                                 } else Text(exerciseSummary(ex), color = Muted, fontSize = 12.sp)
-                                TextButton(onClick = { latestSelect(ex) }, contentPadding = PaddingValues(0.dp)) {
-                                    Text(if (isActive && ex.kind !in listOf(ExerciseKind.WEIGHT, ExerciseKind.BODYWEIGHT)) "Werte eintragen / Details ›" else "Übungsdetails ›",
-                                        color = White, fontSize = 11.sp)
+                                if (isActive && ex.kind !in listOf(ExerciseKind.WEIGHT, ExerciseKind.BODYWEIGHT)) {
+                                    TextButton(onClick = { latestSelect(ex) }, contentPadding = PaddingValues(0.dp)) {
+                                        Text("Werte eintragen", color = White, fontSize = 12.sp)
+                                    }
                                 }
                             }
                         }
@@ -4123,6 +4292,7 @@ private fun WorkoutSheetDialog(
     onSelectExercise: (Exercise) -> Unit,
     isActive: Boolean,
     startedAt: Long,
+    sessionId: String,
     onStartWorkout: () -> Unit,
     onFinishWorkout: () -> Unit,
     onAddExistingExercise: () -> Unit,
@@ -4134,12 +4304,11 @@ private fun WorkoutSheetDialog(
     onDeleteWorkout: () -> Unit
 ) {
     var confirmDelete by remember { mutableStateOf(false) }
-    var showActions by remember { mutableStateOf(false) }
     val scroll = rememberScrollState()
     var viewportTop by remember { mutableFloatStateOf(0f) }
     var viewportBottom by remember { mutableFloatStateOf(0f) }
     val maxHeight = androidx.compose.ui.platform.LocalConfiguration.current.screenHeightDp.dp * .88f
-    val todayLogs = logs.filter { it.workoutId == workout.id && it.date == todayStr }
+    val currentSets = logs.filter { it.workoutId == workout.id && it.sessionId == sessionId }
     Dialog(onDismissRequest = onDismiss, properties = DialogProperties(usePlatformDefaultWidth = false)) {
         Surface(Modifier.fillMaxWidth().padding(horizontal = 14.dp).heightIn(max = maxHeight),
             color = Bg, shape = RoundedCornerShape(28.dp)) {
@@ -4148,20 +4317,14 @@ private fun WorkoutSheetDialog(
                     Box(Modifier.size(7.dp).background(if (isActive) Red else Muted, CircleShape))
                     Spacer(Modifier.width(8.dp))
                     Text(if (isActive) "TRAINING LÄUFT" else "VORBEREITUNG", color = if (isActive) Red else Muted,
-                        fontFamily = FontFamily.Monospace, fontSize = 10.sp, letterSpacing = 1.3.sp,
+                        fontFamily = FontFamily.Default, fontSize = 10.sp, letterSpacing = 1.3.sp,
                         modifier = Modifier.weight(1f))
-                    Box {
-                        IconButton(onClick = { showActions = true }) { Text("⋮", color = White, fontSize = 24.sp) }
-                        DropdownMenu(expanded = showActions, onDismissRequest = { showActions = false }) {
-                            DropdownMenuItem(text = { Text("Workout bearbeiten") }, onClick = { showActions = false; onEditWorkout() })
-                            DropdownMenuItem(text = { Text("Als eigene Vorlage speichern") }, onClick = { showActions = false; onSaveTemplate() })
-                            DropdownMenuItem(text = { Text("Workout löschen", color = Red) },
-                                onClick = { showActions = false; confirmDelete = true })
-                        }
-                    }
+                    IconButton(onClick = onSaveTemplate, modifier = Modifier.semantics { contentDescription = "Als Vorlage speichern" }) { WorkoutTemplateIcon() }
+                    IconButton(onClick = onEditWorkout, modifier = Modifier.semantics { contentDescription = "Workout bearbeiten" }) { WorkoutActionIcon(WorkoutAction.EDIT) }
+                    IconButton(onClick = { confirmDelete = true }, modifier = Modifier.semantics { contentDescription = "Workout löschen" }) { WorkoutActionIcon(WorkoutAction.DELETE, Red) }
                 }
                 DisplayTitle(workout.name, ndot, fontSize = 25.sp)
-                Text(if (isActive) "${exercises.size} Übungen · ${todayLogs.size} Sätze heute" else "${exercises.size} Übungen · Bereite deine Reihenfolge vor",
+                Text(if (isActive) "${exercises.size} Übungen · ${currentSets.size} Sätze in dieser Einheit" else "${exercises.size} Übungen · Bereite deine Reihenfolge vor",
                     color = Muted, fontSize = 12.sp)
                 if (isActive && startedAt > 0L) {
                     Text("Gestartet um " + java.text.SimpleDateFormat("HH:mm", Locale.GERMAN).format(java.util.Date(startedAt)),
@@ -4194,7 +4357,7 @@ private fun WorkoutSheetDialog(
                             Text("Füge deine erste Übung hinzu. Die Reihenfolge kannst du jederzeit durch Ziehen ändern.",
                                 color = Muted, fontSize = 13.sp, modifier = Modifier.padding(18.dp))
                         }
-                    } else WorkoutExerciseStack(workout, exercises, logs, todayStr, isActive, scroll,
+                    } else WorkoutExerciseStack(workout, exercises, logs, todayStr, isActive, sessionId, scroll,
                         viewportTop, viewportBottom, onReorderExercises, onSelectExercise, onQuickLog)
                     Spacer(Modifier.height(2.dp))
                 }
@@ -4297,7 +4460,7 @@ private fun WorkoutTemplateManager(
         Surface(Modifier.fillMaxWidth().padding(16.dp), color = Panel, shape = RoundedCornerShape(28.dp)) {
             Column(Modifier.padding(18.dp)) {
                 Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
-                    Text("TRAINING PLANEN", color = Red, fontSize = 10.sp, fontFamily = FontFamily.Monospace,
+                    Text("TRAINING PLANEN", color = Red, fontSize = 10.sp, fontFamily = FontFamily.Default,
                         modifier = Modifier.weight(1f))
                     IconButton(onClick = onDismiss) { Text("✕", color = White) }
                 }
@@ -4506,13 +4669,13 @@ private fun WorkoutEditorDialog(
         ) {
             Column(Modifier.verticalScroll(rememberScrollState()).padding(22.dp)) {
                 Text("WORKOUT PLANEN", color = Red, fontSize = 10.sp,
-                    fontFamily = FontFamily.Monospace, letterSpacing = 1.3.sp)
+                    fontFamily = FontFamily.Default, letterSpacing = 1.3.sp)
                 Spacer(Modifier.height(6.dp))
                 DisplayTitle(if (isNew) "NEUES WORKOUT" else "WORKOUT BEARBEITEN", ndot, fontSize = 26.sp)
                 Text("Vorlage wählen, Details prüfen und Training öffnen.", color = Muted, fontSize = 12.sp)
                 Spacer(Modifier.height(16.dp))
 
-                Text("01  VORLAGE", color = Muted, fontSize = 10.sp, fontFamily = FontFamily.Monospace)
+                Text("01  VORLAGE", color = Muted, fontSize = 10.sp, fontFamily = FontFamily.Default)
                 Spacer(Modifier.height(8.dp))
                 Surface(
                     color = Panel2,
@@ -4528,7 +4691,7 @@ private fun WorkoutEditorDialog(
                 if (selectedPresetName.isNotBlank()) {
                     Surface(color = Panel2, shape = RoundedCornerShape(18.dp), modifier = Modifier.fillMaxWidth()) {
                         Column(Modifier.padding(16.dp)) {
-                            Text("VORLAGE AUSGEWÄHLT", color = Red, fontSize = 10.sp, fontFamily = FontFamily.Monospace)
+                            Text("VORLAGE AUSGEWÄHLT", color = Red, fontSize = 10.sp, fontFamily = FontFamily.Default)
                             Spacer(Modifier.height(6.dp))
                             DisplayTitle(name.uppercase(Locale.GERMAN), ndot, fontSize = 24.sp)
                             Text("${selectedIds.size} Übungen · ${when (workoutKind) {
@@ -4551,7 +4714,7 @@ private fun WorkoutEditorDialog(
                         }
                     }
                 } else {
-                Text("02  DETAILS", color = Muted, fontSize = 10.sp, fontFamily = FontFamily.Monospace,
+                Text("02  DETAILS", color = Muted, fontSize = 10.sp, fontFamily = FontFamily.Default,
                     modifier = Modifier.padding(top = 8.dp, bottom = 8.dp))
                 OutlinedTextField(
                     value = name,
@@ -4596,7 +4759,7 @@ private fun WorkoutEditorDialog(
                         modifier = Modifier.fillMaxWidth().padding(top = 8.dp))
                 }
                 Spacer(Modifier.height(10.dp))
-                Text("03  ÜBUNGEN", color = Muted, fontSize = 10.sp, fontFamily = FontFamily.Monospace,
+                Text("03  ÜBUNGEN", color = Muted, fontSize = 10.sp, fontFamily = FontFamily.Default,
                     modifier = Modifier.padding(top = 8.dp, bottom = 8.dp))
                 Surface(
                     color = Panel2,
@@ -4661,7 +4824,7 @@ private fun WorkoutEditorDialog(
             text = {
                 Column(Modifier.heightIn(max = 410.dp).verticalScroll(rememberScrollState()), verticalArrangement = Arrangement.spacedBy(8.dp)) {
                     if (personalTemplates.isNotEmpty()) {
-                        Text("MEINE VORLAGEN", color = Red, fontSize = 10.sp, fontFamily = FontFamily.Monospace)
+                        Text("MEINE VORLAGEN", color = Red, fontSize = 10.sp, fontFamily = FontFamily.Default)
                         personalTemplates.forEach { (templateKey, obj) ->
                             Surface(color = Panel2, shape = RoundedCornerShape(15.dp), modifier = Modifier.fillMaxWidth()) {
                                 Row(Modifier.padding(12.dp), verticalAlignment = Alignment.CenterVertically) {
@@ -4678,7 +4841,7 @@ private fun WorkoutEditorDialog(
                             }
                         }
                     }
-                    Text("STANDARDVORLAGEN", color = Muted, fontSize = 10.sp, fontFamily = FontFamily.Monospace)
+                    Text("STANDARDVORLAGEN", color = Muted, fontSize = 10.sp, fontFamily = FontFamily.Default)
                     workoutPresets.forEach { preset ->
                         Surface(color = Panel2, shape = RoundedCornerShape(15.dp),
                             modifier = Modifier.fillMaxWidth().clickable {
@@ -4767,7 +4930,7 @@ private fun ExerciseDetailDialog(
             Column(Modifier.verticalScroll(rememberScrollState()).padding(22.dp)) {
                 Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
                     Text(exerciseKindLabel(exercise.kind).uppercase(Locale.GERMAN), color = Red,
-                        fontFamily = FontFamily.Monospace, fontSize = 10.sp, modifier = Modifier.weight(1f))
+                        fontFamily = FontFamily.Default, fontSize = 10.sp, modifier = Modifier.weight(1f))
                     Box {
                         IconButton(onClick = { showExerciseActions = true }) { Text("⋮", color = White, fontSize = 24.sp) }
                         DropdownMenu(expanded = showExerciseActions, onDismissRequest = { showExerciseActions = false }) {
@@ -4805,7 +4968,7 @@ private fun ExerciseDetailDialog(
                                     Text(
                                         "${i + 1}.",
                                         color = Red,
-                                        fontFamily = FontFamily.Monospace,
+                                        fontFamily = FontFamily.Default,
                                         fontSize = 11.sp,
                                         modifier = Modifier.width(22.dp)
                                     )
@@ -4917,7 +5080,7 @@ private fun ExerciseDetailDialog(
                         Text(
                             "SATZ SPEICHERN",
                             color = Bg,
-                            fontFamily = FontFamily.Monospace,
+                            fontFamily = FontFamily.Default,
                             fontSize = 12.sp,
                             fontWeight = FontWeight.Medium,
                             letterSpacing = 1.4.sp
@@ -4943,8 +5106,8 @@ private fun ExerciseDetailDialog(
                                     .padding(horizontal = 12.dp, vertical = 8.dp),
                                 horizontalArrangement = Arrangement.SpaceBetween
                             ) {
-                                Text(log.date, color = Muted, fontFamily = FontFamily.Monospace, fontSize = 11.sp)
-                                Text(logSummary(exercise, log), color = White, fontFamily = FontFamily.Monospace, fontSize = 11.sp)
+                                Text(log.date, color = Muted, fontFamily = FontFamily.Default, fontSize = 11.sp)
+                                Text(logSummary(exercise, log), color = White, fontFamily = FontFamily.Default, fontSize = 11.sp)
                             }
                         }
                     }
@@ -5539,7 +5702,7 @@ private fun AiExerciseImportDialog(
                     label = { Text("JSON-Antwort hier einfügen") },
                     minLines = 5,
                     maxLines = 9,
-                    textStyle = TextStyle(fontFamily = FontFamily.Monospace, fontSize = 11.sp),
+                    textStyle = TextStyle(fontFamily = FontFamily.Default, fontSize = 11.sp),
                     modifier = Modifier.fillMaxWidth()
                 )
 
@@ -5955,9 +6118,9 @@ private fun SetupScreen(
             verticalAlignment = Alignment.CenterVertically,
             horizontalArrangement = Arrangement.SpaceBetween
         ) {
-            Text("AUFGABEN & WOCHENZIELE", color = Muted, fontFamily = FontFamily.Monospace, fontSize = 10.sp, letterSpacing = 1.7.sp)
+            Text("AUFGABEN & WOCHENZIELE", color = Muted, fontFamily = FontFamily.Default, fontSize = 10.sp, letterSpacing = 1.7.sp)
             TextButton(onClick = onAdd) {
-                Text("+ NEU", color = White, fontFamily = FontFamily.Monospace, fontSize = 11.sp, letterSpacing = 1.7.sp)
+                Text("+ NEU", color = White, fontFamily = FontFamily.Default, fontSize = 11.sp, letterSpacing = 1.7.sp)
             }
         }
 
@@ -6099,9 +6262,9 @@ private fun SetupScreen(
         )
         HorizontalDivider(color = Color(0xFF242424), modifier = Modifier.padding(top = 6.dp))
         Text(
-            "NPLANNER · VERSION 0.39",
+            "NPLANNER · VERSION 0.40",
             color = Color(0xFFB6B6B6),
-            fontFamily = FontFamily.Monospace,
+            fontFamily = FontFamily.Default,
             fontSize = 10.sp,
             letterSpacing = 1.3.sp,
             modifier = Modifier.fillMaxWidth().padding(top = 16.dp, bottom = 10.dp),
@@ -6324,7 +6487,7 @@ private fun SectionLabel(
     Text(
         text,
         color = Muted,
-        fontFamily = FontFamily.Monospace,
+        fontFamily = FontFamily.Default,
         fontSize = 10.sp,
         letterSpacing = 1.7.sp,
         modifier = Modifier.padding(top = topPadding, bottom = bottomPadding)
