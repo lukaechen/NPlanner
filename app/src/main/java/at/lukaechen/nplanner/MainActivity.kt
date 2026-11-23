@@ -2764,6 +2764,13 @@ private fun TrainingScreen(
     }
     var activeExercise by remember { mutableStateOf<Exercise?>(null) }
     var showNewWorkoutDialog by remember { mutableStateOf(false) }
+    var showTemplateManager by remember { mutableStateOf(false) }
+    var templateRevision by remember { mutableIntStateOf(0) }
+    val templates = remember(templateRevision) {
+        resultPrefs.all.filterKeys { it.startsWith("workout_template:") }
+            .mapNotNull { (key, value) -> runCatching { key to JSONObject(value as String) }.getOrNull() }
+            .sortedBy { it.second.optString("name").lowercase(Locale.GERMAN) }
+    }
     var editingWorkout by remember { mutableStateOf<Workout?>(null) }
     var showNewExerciseDialog by remember { mutableStateOf(false) }
     var showAiImportDialog by remember { mutableStateOf(false) }
@@ -2875,11 +2882,16 @@ private fun TrainingScreen(
                         fontSize = 10.sp,
                         letterSpacing = 1.6.sp
                     )
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        TextButton(onClick = { showTemplateManager = true }) {
+                            Text("VORLAGEN", color = Muted, fontSize = 10.sp, fontFamily = FontFamily.Monospace)
+                        }
                     TextButton(onClick = {
                         onHapticTick()
                         showNewWorkoutDialog = true
                     }) {
                         Text("+ WORKOUT", color = White, fontFamily = FontFamily.Monospace, fontSize = 11.sp, letterSpacing = 1.4.sp)
+                    }
                     }
                 }
 
@@ -3329,11 +3341,6 @@ private fun TrainingScreen(
                     targetWorkoutForNewEx = workout.id
                     showNewExerciseDialog = true
                 },
-                onImportAiExercise = {
-                    onHapticTick()
-                    targetWorkoutForNewEx = workout.id
-                    showAiImportDialog = true
-                },
                 onMoveExercise = { from, to ->
                     if (from in workout.exerciseIds.indices && to in workout.exerciseIds.indices) {
                         val ids = workout.exerciseIds.toMutableList()
@@ -3391,6 +3398,39 @@ private fun TrainingScreen(
                 containerColor = Panel
             )
         }
+    }
+
+    if (showTemplateManager) {
+        AlertDialog(
+            onDismissRequest = { showTemplateManager = false },
+            containerColor = Panel, shape = RoundedCornerShape(26.dp),
+            title = { DisplayTitle("MEINE VORLAGEN", ndot, fontSize = 24.sp) },
+            text = {
+                Column(Modifier.heightIn(max = 390.dp).verticalScroll(rememberScrollState()),
+                    verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                    if (templates.isEmpty()) Text("Noch keine eigenen Vorlagen gespeichert.", color = Muted, fontSize = 12.sp)
+                    templates.forEach { (key, obj) ->
+                        var editName by remember(key) { mutableStateOf(obj.optString("name")) }
+                        Surface(color = Panel2, shape = RoundedCornerShape(16.dp)) {
+                            Column(Modifier.padding(12.dp)) {
+                                OutlinedTextField(editName, { editName = it.take(48) },
+                                    label = { Text("Vorlagenname") }, singleLine = true, modifier = Modifier.fillMaxWidth())
+                                Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.End) {
+                                    TextButton(enabled = editName.isNotBlank(), onClick = {
+                                        resultPrefs.edit().putString(key, obj.put("name", editName.trim()).toString()).apply()
+                                        templateRevision++
+                                    }) { Text("Speichern", color = White) }
+                                    TextButton(onClick = {
+                                        resultPrefs.edit().remove(key).apply(); templateRevision++
+                                    }) { WorkoutActionIcon(WorkoutAction.DELETE, Red) }
+                                }
+                            }
+                        }
+                    }
+                }
+            },
+            confirmButton = { TextButton(onClick = { showTemplateManager = false }) { Text("Schließen") } }
+        )
     }
 
     if (showNewWorkoutDialog) {
@@ -3914,7 +3954,6 @@ private fun WorkoutSheetDialog(
     onFinishWorkout: () -> Unit,
     onAddExistingExercise: () -> Unit,
     onAddNewExercise: () -> Unit,
-    onImportAiExercise: () -> Unit,
     onEditWorkout: () -> Unit,
     onMoveExercise: (Int, Int) -> Unit,
     onSaveTemplate: () -> Unit,
@@ -3985,7 +4024,7 @@ private fun WorkoutSheetDialog(
                     }
                 ) {
                     Box(contentAlignment = Alignment.Center) {
-                        Text(if (isActive) "TRAINING BEENDEN" else "WORKOUT STARTEN",
+                        Text(if (isActive) "TRAINING BEENDEN" else "TRAINING STARTEN",
                             color = if (isActive) White else Bg, fontSize = 13.sp)
                     }
                 }
@@ -3996,13 +4035,10 @@ private fun WorkoutSheetDialog(
                 Spacer(Modifier.height(12.dp))
 
                 // Subtile Aktionsleiste fuer neue Uebungen im Workout
-                Row(
-                    Modifier.fillMaxWidth(),
-                    horizontalArrangement = Arrangement.spacedBy(8.dp)
-                ) {
-                    ChoiceChip("+ Vorhandene", true, Modifier.weight(1f)) { onAddExistingExercise() }
-                    ChoiceChip("+ Neu", false, Modifier.weight(1f)) { onAddNewExercise() }
-                    ChoiceChip("KI / JSON", false, Modifier.weight(1f)) { onImportAiExercise() }
+                SectionLabel(if (isActive) "TRAININGSEINHEIT" else "VORBEREITUNG", topPadding = 4.dp, bottomPadding = 8.dp)
+                Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                    ChoiceChip("+ Übung hinzufügen", true, Modifier.weight(1f)) { onAddExistingExercise() }
+                    ChoiceChip("+ Neu", false, Modifier.weight(0.55f)) { onAddNewExercise() }
                 }
 
                 Spacer(Modifier.height(14.dp))
@@ -4018,7 +4054,7 @@ private fun WorkoutSheetDialog(
                         modifier = Modifier.fillMaxWidth()
                     ) {
                         Text(
-                            "Noch keine Übungen in diesem Workout. Tippe oben auf „+ Übung“, „KI / JSON“ oder „✎“.",
+                            "Noch keine Übungen vorhanden. Füge Übungen hinzu oder bearbeite die Workout-Vorlage.",
                             color = Muted,
                             fontSize = 12.sp,
                             modifier = Modifier.padding(16.dp)
@@ -4185,6 +4221,7 @@ private fun WorkoutEditorDialog(
     val haptic = LocalHapticFeedback.current
     var name by remember { mutableStateOf(initialName) }
     var nameManuallyEdited by remember { mutableStateOf(!isNew) }
+    var showNote by remember { mutableStateOf(initialNote.isNotBlank()) }
     var note by remember { mutableStateOf(initialNote) }
     var workoutKind by remember { mutableStateOf(initialKind) }
     var durationText by remember { mutableStateOf((initialDurationSeconds / 60).takeIf { it > 0 }?.toString() ?: "20") }
@@ -4241,6 +4278,32 @@ private fun WorkoutEditorDialog(
                     }
                 }
                 Spacer(Modifier.height(8.dp))
+                if (selectedPresetName.isNotBlank()) {
+                    Surface(color = Panel2, shape = RoundedCornerShape(18.dp), modifier = Modifier.fillMaxWidth()) {
+                        Column(Modifier.padding(16.dp)) {
+                            Text("VORLAGE AUSGEWÄHLT", color = Red, fontSize = 10.sp, fontFamily = FontFamily.Monospace)
+                            Spacer(Modifier.height(6.dp))
+                            DisplayTitle(name.uppercase(Locale.GERMAN), ndot, fontSize = 24.sp)
+                            Text("${selectedIds.size} Übungen · ${when (workoutKind) {
+                                WorkoutKind.CLASSIC -> "Klassisch"
+                                WorkoutKind.AMRAP -> "AMRAP"
+                                WorkoutKind.FOR_TIME -> "For Time"
+                                WorkoutKind.EMOM -> "EMOM"
+                            }}", color = Muted, fontSize = 12.sp)
+                            if (workoutKind != WorkoutKind.CLASSIC) {
+                                Spacer(Modifier.height(10.dp))
+                                OutlinedTextField(durationText, { durationText = it.filter(Char::isDigit).take(3) },
+                                    label = { Text("Dauer (Minuten)") },
+                                    singleLine = true,
+                                    keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
+                                    modifier = Modifier.fillMaxWidth())
+                            }
+                            TextButton(onClick = { selectedPresetName = ""; saveAsTemplate = false }) {
+                                Text("Vorlage individuell anpassen", color = White, fontSize = 12.sp)
+                            }
+                        }
+                    }
+                } else {
                 Text("02  DETAILS", color = Muted, fontSize = 10.sp, fontFamily = FontFamily.Monospace,
                     modifier = Modifier.padding(top = 8.dp, bottom = 8.dp))
                 OutlinedTextField(
@@ -4253,14 +4316,20 @@ private fun WorkoutEditorDialog(
                     singleLine = true,
                     modifier = Modifier.fillMaxWidth()
                 )
-                Spacer(Modifier.height(10.dp))
-                OutlinedTextField(
-                    value = note,
-                    onValueChange = { note = it.take(80) },
-                    label = { Text("Notiz / Fokus (optional)") },
-                    singleLine = true,
-                    modifier = Modifier.fillMaxWidth()
-                )
+                Spacer(Modifier.height(8.dp))
+                if (!showNote) {
+                    TextButton(onClick = { showNote = true }, contentPadding = PaddingValues(horizontal = 0.dp)) {
+                        Text("+ Notiz hinzufügen", color = Muted, fontSize = 12.sp)
+                    }
+                } else {
+                    OutlinedTextField(
+                        value = note,
+                        onValueChange = { note = it.take(80) },
+                        label = { Text("Notiz / Fokus") },
+                        singleLine = true,
+                        modifier = Modifier.fillMaxWidth()
+                    )
+                }
 
                 SectionLabel("WORKOUT-ART", topPadding = 14.dp, bottomPadding = 8.dp)
                 Row(Modifier.horizontalScroll(rememberScrollState()), horizontalArrangement = Arrangement.spacedBy(7.dp)) {
@@ -4292,18 +4361,21 @@ private fun WorkoutEditorDialog(
                         Text("${selectedIds.size}  ›", color = Muted)
                     }
                 }
-                if (presetNotice.isNotBlank()) Text(presetNotice, color = Muted, fontSize = 11.sp,
+                }
+                if (presetNotice.isNotBlank() && selectedPresetName.isBlank()) Text(presetNotice, color = Muted, fontSize = 11.sp,
                     modifier = Modifier.padding(top = 8.dp))
 
                 Spacer(Modifier.height(12.dp))
-                Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
+                if (selectedPresetName.isBlank()) Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
                     Column(Modifier.weight(1f)) {
                         Text("Als eigene Vorlage speichern", color = White, fontSize = 13.sp)
                         Text("Ohne Trainingsverlauf, separat wiederverwendbar.", color = Muted, fontSize = 10.sp)
                     }
                     Switch(checked = saveAsTemplate, enabled = selectedIds.isNotEmpty(), onCheckedChange = { saveAsTemplate = it })
                 }
-                Text(if (isNew && workoutKind == WorkoutKind.AMRAP)
+                Text(if (selectedPresetName.isNotBlank())
+                    "Vorlage übernehmen und Workout vorbereiten. Das Training startet anschließend manuell."
+                    else if (isNew && workoutKind == WorkoutKind.AMRAP)
                     "Workout vorbereiten. Der AMRAP-Countdown startet erst mit STARTEN."
                     else if (isNew) "Das Workout wird angelegt und anschließend geöffnet."
                     else "Änderungen werden gespeichert.",
@@ -4364,6 +4436,7 @@ private fun WorkoutEditorDialog(
                                         workoutKind = runCatching { WorkoutKind.valueOf(obj.optString("kind")) }.getOrDefault(WorkoutKind.CLASSIC)
                                         durationText = (obj.optInt("duration") / 60).coerceAtLeast(1).toString()
                                         name = obj.optString("name"); note = obj.optString("note")
+                                        selectedPresetName = name
                                         nameManuallyEdited = true
                                         presetNotice = "Eigene Vorlage geladen: ${resolved.size} Übungen."
                                         showPresetPicker = false
@@ -5810,7 +5883,7 @@ private fun SetupScreen(
         )
         HorizontalDivider(color = Color(0xFF242424), modifier = Modifier.padding(top = 6.dp))
         Text(
-            "NPLANNER · VERSION 0.36",
+            "NPLANNER · VERSION 0.37",
             color = Color(0xFFB6B6B6),
             fontFamily = FontFamily.Monospace,
             fontSize = 10.sp,
