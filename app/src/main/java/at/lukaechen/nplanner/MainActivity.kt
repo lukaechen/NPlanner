@@ -11,6 +11,7 @@ import androidx.compose.ui.layout.onGloballyPositioned
 import androidx.compose.ui.layout.positionInRoot
 import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.semantics
+import androidx.compose.ui.graphics.toArgb
 import android.os.Bundle
 import android.os.VibrationEffect
 import android.os.Vibrator
@@ -106,12 +107,12 @@ import kotlin.math.cos
 import kotlin.math.roundToInt
 import kotlin.math.sin
 
-private val Bg = Color(0xFF080808)
-private val Panel = Color(0xFF191919)
-private val Panel2 = Color(0xFF252525)
-private val White = Color(0xFFE8E7E2)
-private val Muted = Color(0xFF858585)
-private val Red = Color(0xFFE03930)
+private val Bg get() = NPlannerAppearance.palette.background
+private val Panel get() = NPlannerAppearance.palette.panel
+private val Panel2 get() = NPlannerAppearance.palette.panel2
+private val White get() = NPlannerAppearance.palette.foreground
+private val Muted get() = NPlannerAppearance.palette.muted
+private val Red get() = NPlannerAppearance.palette.accent
 
 /** FIXED = feste Uhrzeit, INTERVAL = Zeitabstand mit Von/Bis, ALLDAY = ohne Zeit, WEEKLY = Flexibles Wochenziel (1..14x pro Woche). */
 enum class RuleKind { FIXED, INTERVAL, ALLDAY, WEEKLY }
@@ -135,7 +136,10 @@ data class Rule(
     val optional: Boolean = false
 )
 
-private data class MuscleOption(val id: String, val label: String, val category: String)
+private data class MuscleOption(val id: String, private val rawLabel: String, val rawCategory: String) {
+    val label: String get() = npMuscleLabel(rawLabel)
+    val category: String get() = npMuscleLabel(rawCategory)
+}
 
 private val muscleCatalogue = listOf(
     MuscleOption("chest", "Brust", "Brust"),
@@ -246,17 +250,17 @@ private val LocalPageScroll = compositionLocalOf<ScrollState?> { null }
 
 // ---------- Zeit- und Regel-Helfer ----------
 
-private fun fmt(min: Int): String = String.format(Locale.GERMAN, "%02d:%02d", min / 60, min % 60)
+private fun fmt(min: Int): String = String.format(npLocale(), "%02d:%02d", min / 60, min % 60)
 
 private fun fmtKg(kg: Float): String =
-    if (kg % 1f == 0f) "${kg.toInt()} kg" else String.format(Locale.GERMAN, "%.1f kg", kg)
+    if (kg % 1f == 0f) npString(R.string.np_370a3b22c813 , kg.toInt()) else String.format(npLocale(), npString(R.string.np_907d342d4ac0), kg)
 
 private fun minuteOfDay(): Int = LocalTime.now().let { it.hour * 60 + it.minute }
 
 private fun everyLabel(min: Int): String = when {
-    min < 60 -> "$min Min."
-    min % 60 == 0 -> "${min / 60} Std."
-    else -> "${min / 60} Std. ${min % 60} Min."
+    min < 60 -> npString(R.string.np_0e961ac28402 , min)
+    min % 60 == 0 -> npString(R.string.np_e36d2e63597b , min / 60)
+    else -> npString(R.string.np_96c878b2e330 , min / 60, min % 60)
 }
 
 private fun Rule.slots(): List<Int> {
@@ -288,40 +292,40 @@ private fun sortKey(r: Rule): Int = when (r.kind) {
 private fun scheduleLabel(r: Rule): String {
     val base = when (r.kind) {
         RuleKind.FIXED -> "${fmt(r.timeMin)} · ${dayLabel(r.days)}"
-        RuleKind.INTERVAL -> "Alle ${everyLabel(r.everyMin)} · ${fmt(r.fromMin)}–${fmt(r.toMin)} · ${dayLabel(r.days)}"
-        RuleKind.WEEKLY -> "${r.weeklyTarget.coerceIn(1, 14)}× pro Woche · flexibel"
+        RuleKind.INTERVAL -> npString(R.string.np_446996825c07 , everyLabel(r.everyMin), fmt(r.fromMin), fmt(r.toMin), dayLabel(r.days))
+        RuleKind.WEEKLY -> npString(R.string.np_45a8510351ce , r.weeklyTarget.coerceIn(1, 14))
         RuleKind.ALLDAY -> dayLabel(r.days)
     }
-    return if (r.optional) "$base · Optional" else base
+    return if (r.optional) npString(R.string.np_2eb32096eb64 , base) else base
 }
 
 private fun exerciseKindLabel(kind: ExerciseKind): String = when (kind) {
-    ExerciseKind.WEIGHT -> "Gewicht"
-    ExerciseKind.BODYWEIGHT -> "Körpergewicht"
-    ExerciseKind.TIMED -> "Zeit / Intervall"
-    ExerciseKind.CARDIO -> "Cardio"
-    ExerciseKind.AMRAP -> "AMRAP / Runden"
+    ExerciseKind.WEIGHT -> npString(R.string.np_b80121b7ef4f)
+    ExerciseKind.BODYWEIGHT -> npString(R.string.np_f75cff63870c)
+    ExerciseKind.TIMED -> npString(R.string.np_8ab99e35cd2b)
+    ExerciseKind.CARDIO -> npString(R.string.np_eb013efc32e2)
+    ExerciseKind.AMRAP -> npString(R.string.np_60adbb887847)
 }
 
 private fun exerciseSummary(ex: Exercise): String = when (ex.kind) {
-    ExerciseKind.CARDIO -> "${ex.muscle} · Cardio · Ziel ${ex.targetSeconds / 60} Min."
-    ExerciseKind.AMRAP -> "${ex.muscle} · AMRAP · ${ex.targetSeconds / 60} Min. · ${ex.targetReps} Runden"
-    ExerciseKind.WEIGHT -> "${ex.muscle} · Gewicht · Ziel ${fmtKg(ex.targetWeightKg)} × ${ex.targetReps}"
-    ExerciseKind.BODYWEIGHT -> "${ex.muscle} · Körpergewicht · Ziel ${ex.targetReps} Wdh."
+    ExerciseKind.CARDIO -> npString(R.string.np_afb51020f59b , npMuscleLabel(ex.muscle), ex.targetSeconds / 60)
+    ExerciseKind.AMRAP -> npString(R.string.np_7a82603f955e , npMuscleLabel(ex.muscle), ex.targetSeconds / 60, ex.targetReps)
+    ExerciseKind.WEIGHT -> npString(R.string.np_73e9acc95f81 , npMuscleLabel(ex.muscle), fmtKg(ex.targetWeightKg), ex.targetReps)
+    ExerciseKind.BODYWEIGHT -> npString(R.string.np_c4d6f0b64fd9 , npMuscleLabel(ex.muscle), ex.targetReps)
     ExerciseKind.TIMED -> if (ex.targetReps > 1) {
-        "${ex.muscle} · Zeit · Ziel ${ex.targetReps} Wdh. in ${ex.targetSeconds} Sek."
+        npString(R.string.np_d1493a657eaf , npMuscleLabel(ex.muscle), ex.targetReps, ex.targetSeconds)
     } else {
-        "${ex.muscle} · Zeit · Ziel ${ex.targetSeconds} Sek."
+        npString(R.string.np_cfe7d95c9056 , npMuscleLabel(ex.muscle), ex.targetSeconds)
     }
 }
 
 private fun logSummary(ex: Exercise, log: ExerciseLog): String = when (ex.kind) {
-    ExerciseKind.CARDIO -> "${log.seconds / 60} Min. ${log.seconds % 60} Sek." +
-        if (log.distanceKm > 0f) " · ${fmtKg(log.distanceKm).replace(" kg", " km")}" else ""
-    ExerciseKind.AMRAP -> "${log.reps} Runden in ${log.seconds / 60} Min."
-    ExerciseKind.WEIGHT -> "${fmtKg(log.weightKg)} × ${log.reps} Wdh."
-    ExerciseKind.BODYWEIGHT -> "${log.reps} Wdh."
-    ExerciseKind.TIMED -> if (log.reps > 1) "${log.reps} Wdh. in ${log.seconds} Sek." else "${log.seconds} Sek."
+    ExerciseKind.CARDIO -> npString(R.string.np_25c1be96314d , log.seconds / 60, log.seconds % 60) +
+        if (log.distanceKm > 0f) " · ${fmtKg(log.distanceKm).replace(npString(R.string.np_77c51fce099a), npString(R.string.np_f50a8a12533c))}" else ""
+    ExerciseKind.AMRAP -> npString(R.string.np_34d251f16f5b , log.reps, log.seconds / 60)
+    ExerciseKind.WEIGHT -> npString(R.string.np_7e719873d064 , fmtKg(log.weightKg), log.reps)
+    ExerciseKind.BODYWEIGHT -> npString(R.string.np_6a8982ba88d0 , log.reps)
+    ExerciseKind.TIMED -> if (log.reps > 1) npString(R.string.np_81648b7f9994 , log.reps, log.seconds) else npString(R.string.np_7f854c57c3cb , log.seconds)
 }
 
 private fun weekStartKey(d: LocalDate): String =
@@ -448,7 +452,7 @@ private fun parseNpefExercises(rawInput: String): Result<List<Exercise>> = runCa
 
     val format = rootObj.optString("format", NPEF_FORMAT_ID)
     require(format == NPEF_FORMAT_ID) {
-        "Unbekanntes Dateiformat „$format“. Erwartet wird „$NPEF_FORMAT_ID“."
+        "Unbekanntes Dateiformat „${format}“. Erwartet wird „${NPEF_FORMAT_ID}“."
     }
 
     val arr = rootObj.getJSONArray("exercises")
@@ -565,10 +569,10 @@ class MainActivity : ComponentActivity() {
                     createdDate = todayStr
                 )
                 val wk = weekStartKey(LocalDate.now())
-                val oldCnt = prefs.getInt("goal_cnt:$wk", 0).coerceIn(0, legacyTarget)
+                val oldCnt = prefs.getInt("goal_cnt:${wk}", 0).coerceIn(0, legacyTarget)
                 prefs.edit()
-                    .putInt("wk_cnt:$wk:${sportRule.id}", oldCnt)
-                    .putBoolean("wk:$wk:${sportRule.id}", oldCnt >= legacyTarget)
+                    .putInt("wk_cnt:${wk}:${sportRule.id}", oldCnt)
+                    .putBoolean("wk:${wk}:${sportRule.id}", oldCnt >= legacyTarget)
                     .apply()
                 parsed + sportRule
             }
@@ -840,6 +844,8 @@ class MainActivity : ComponentActivity() {
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
+        NPlannerAppearance.initialize(this)
+        seedEditableWorkoutTemplates(this)
         NPlannerRoomBridge.start(applicationContext, prefs)
         setContent {
             val ndot = FontFamily(androidx.compose.ui.text.font.Font(resId = R.font.ndot_47))
@@ -849,18 +855,41 @@ class MainActivity : ComponentActivity() {
             val classicHeadings = if (ntypeId != 0) {
                 FontFamily(androidx.compose.ui.text.font.Font(resId = ntypeId))
             } else FontFamily.Default
+            val systemDark = androidx.compose.foundation.isSystemInDarkTheme()
+            val effectiveDark = when (NPlannerAppearance.mode) {
+                "light" -> false
+                "dark" -> true
+                else -> systemDark
+            }
+            // Single-activity app: snapshot-backed palette also works inside Canvas callbacks.
+            NPlannerAppearance.applyPalette(effectiveDark)
+            androidx.compose.runtime.SideEffect {
+                @Suppress("DEPRECATION")
+                window.statusBarColor = NPlannerAppearance.palette.background.toArgb()
+                @Suppress("DEPRECATION")
+                window.navigationBarColor = NPlannerAppearance.palette.background.toArgb()
+                androidx.core.view.WindowCompat.getInsetsController(window, window.decorView).apply {
+                    isAppearanceLightStatusBars = !effectiveDark
+                    isAppearanceLightNavigationBars = !effectiveDark
+                }
+            }
+            // Read language here so all visible screens update without recreating the Activity.
+            val language = NPlannerAppearance.language
+            val localizedConfiguration = remember(language, androidx.compose.ui.platform.LocalConfiguration.current) {
+                android.content.res.Configuration(resources.configuration).apply {
+                    setLocale(java.util.Locale.forLanguageTag(language))
+                }
+            }
+            CompositionLocalProvider(androidx.compose.ui.platform.LocalConfiguration provides localizedConfiguration) {
             MaterialTheme(
-                colorScheme = darkColorScheme(
-                    primary = White,
-                    onPrimary = Bg,
-                    background = Bg,
-                    onBackground = White,
-                    surface = Panel,
-                    onSurface = White,
-                    surfaceVariant = Panel2,
-                    onSurfaceVariant = White,
-                    secondary = White,
-                    onSecondary = Bg
+                colorScheme = if (effectiveDark) darkColorScheme(
+                    primary = Red, secondary = White, background = Bg, surface = Panel,
+                    onPrimary = Color.White, onSecondary = Bg, onBackground = White, onSurface = White,
+                    surfaceVariant = Panel2, onSurfaceVariant = Muted, outline = Muted
+                ) else lightColorScheme(
+                    primary = Red, secondary = White, background = Bg, surface = Panel,
+                    onPrimary = Color.White, onSecondary = Bg, onBackground = White, onSurface = White,
+                    surfaceVariant = Panel2, onSurfaceVariant = Muted, outline = Muted
                 ),
                 typography = systemTypography()
             ) {
@@ -870,6 +899,7 @@ class MainActivity : ComponentActivity() {
                 ) {
                     NPlanner(ndot)
                 }
+            }
             }
         }
     }
@@ -896,10 +926,10 @@ class MainActivity : ComponentActivity() {
 
         fun weekKey(rule: Rule, d: LocalDate = date) = "wk:${weekStartKey(d)}:${rule.id}"
         fun weekCountKey(rule: Rule, d: LocalDate = date) = "wk_cnt:${weekStartKey(d)}:${rule.id}"
-        fun weeklyDayKey(rule: Rule, d: LocalDate = date) = "wk_day:$d:${rule.id}"
+        fun weeklyDayKey(rule: Rule, d: LocalDate = date) = "wk_day:${d}:${rule.id}"
 
         fun doneCount(rule: Rule, d: LocalDate = date): Int = when (rule.kind) {
-            RuleKind.INTERVAL -> prefs.getInt("cnt:$d:${rule.id}", 0).coerceIn(0, totalOf(rule))
+            RuleKind.INTERVAL -> prefs.getInt("cnt:${d}:${rule.id}", 0).coerceIn(0, totalOf(rule))
             RuleKind.WEEKLY -> {
                 val target = totalOf(rule)
                 if (prefs.contains(weekCountKey(rule, d))) {
@@ -910,7 +940,7 @@ class MainActivity : ComponentActivity() {
                     0
                 }
             }
-            else -> if (prefs.getBoolean("done:$d:${rule.id}", false)) 1 else 0
+            else -> if (prefs.getBoolean("done:${d}:${rule.id}", false)) 1 else 0
         }
 
         fun doneTodayForWeekly(rule: Rule, d: LocalDate = date): Boolean =
@@ -965,7 +995,7 @@ class MainActivity : ComponentActivity() {
                 items.put(JSONArray().put("${r.name} (Wochenziel)").put(1).put(1).put(if (r.optional) 1 else 0))
             }
             val obj = JSONObject().put("done", snap.done).put("total", snap.total).put("items", items)
-            prefs.edit().putString("snap:$d", obj.toString()).apply()
+            prefs.edit().putString("snap:${d}", obj.toString()).apply()
         }
 
         fun freezeHistoryBeforeRuleChange() {
@@ -974,7 +1004,7 @@ class MainActivity : ComponentActivity() {
             val earliest = dates.minOrNull() ?: return
             var d = maxOf(earliest, yesterday.minusYears(10))
             while (!d.isAfter(yesterday)) {
-                val old = prefs.getString("snap:$d", null)
+                val old = prefs.getString("snap:${d}", null)
                 if (old == null) {
                     persistTodaySnapshot(d)
                 } else {
@@ -989,7 +1019,7 @@ class MainActivity : ComponentActivity() {
                         snap.weeklyDoneRules.forEach { r ->
                             items.put(JSONArray().put("${r.name} (Wochenziel)").put(1).put(1).put(if (r.optional) 1 else 0))
                         }
-                        prefs.edit().putString("snap:$d", obj.put("items", items).toString()).apply()
+                        prefs.edit().putString("snap:${d}", obj.put("items", items).toString()).apply()
                     }
                 }
                 d = d.plusDays(1)
@@ -999,7 +1029,7 @@ class MainActivity : ComponentActivity() {
         fun readDaySnapshot(d: LocalDate): DaySnapshot {
             val live = daySnapshot(d)
             if (d == date || d.isAfter(date)) return live
-            val raw = prefs.getString("snap:$d", null)
+            val raw = prefs.getString("snap:${d}", null)
             if (raw != null) {
                 val parsed = runCatching {
                     val o = JSONObject(raw)
@@ -1084,7 +1114,7 @@ class MainActivity : ComponentActivity() {
                     val c = doneCount(rule)
                     val total = totalOf(rule)
                     val next = if (c >= total) c - 1 else c + 1
-                    e.putInt("cnt:$date:${rule.id}", next)
+                    e.putInt("cnt:${date}:${rule.id}", next)
                     becameDone = next > c
                     becameUndone = next < c
                 }
@@ -1095,7 +1125,7 @@ class MainActivity : ComponentActivity() {
                 }
                 else -> {
                     val wasDone = doneCount(rule) >= totalOf(rule)
-                    e.putBoolean("done:$date:${rule.id}", !wasDone)
+                    e.putBoolean("done:${date}:${rule.id}", !wasDone)
                     becameDone = !wasDone
                     becameUndone = wasDone
                 }
@@ -1421,8 +1451,8 @@ private fun DisplayCount(done: Int, total: Int, ndot: FontFamily, fontSize: Text
     val useDot = LocalDotHeadings.current
     Text(
         text = buildAnnotatedString {
-            append("$done")
-            withStyle(SpanStyle(color = Color(0xFF5A5A5A))) { append("/$total") }
+            append("${done}")
+            withStyle(SpanStyle(color = npNeutral(0xFF5A5A5A))) { append("/${total}") }
         },
         color = White,
         fontFamily = if (useDot) ndot else LocalClassicHeadings.current,
@@ -1507,16 +1537,16 @@ private fun TodayScreen(
             .minByOrNull { it.second }
     }
     val status = when {
-        open == 0 -> "Dein Tag ist abgeschlossen."
-        next != null -> "Als Nächstes um ${fmt(next.second)} · ${next.first.name}"
-        else -> "$open ${if (open == 1) "Pflichtaufgabe wartet" else "Pflichtaufgaben warten"} noch auf dich."
+        open == 0 -> npString(R.string.np_d0e1ef5286dc)
+        next != null -> npString(R.string.np_9886f3aa23b9 , fmt(next.second), next.first.name)
+        else -> npString(R.string.np_8ad305b002c2 , open, if (open == 1) npString(R.string.np_bc96c191b7dd) else npString(R.string.np_72062a54a368))
     }
 
     Screen(
         ndot = ndot,
-        eyebrow = "DEIN RHYTHMUS.",
-        title = "HEUTE",
-        subtitle = date.format(DateTimeFormatter.ofPattern("EEEE, d. MMMM", Locale.GERMAN)),
+        eyebrow = npString(R.string.np_6354d998d12d),
+        title = npString(R.string.np_2ae2ac311151),
+        subtitle = date.format(DateTimeFormatter.ofPattern("EEEE, d. MMMM", npLocale())),
         scrollable = false,
         compactHeader = orbit
     ) {
@@ -1547,20 +1577,20 @@ private fun TodayScreen(
         Column(Modifier.weight(1f).verticalScroll(rememberScrollState())) {
             if (doneToday == totalToday) {
                 DisplayTitle(
-                    "FÜR HEUTE FERTIG.",
+                    npString(R.string.np_5fdacf19cdc6),
                     ndot,
                     Modifier.align(Alignment.CenterHorizontally).padding(top = if (orbit) 10.dp else 18.dp),
                     28.sp
                 )
                 Text(
-                    "Alle Pflichtziele erreicht. Der Rest des Tages gehört dir.",
+                    npString(R.string.np_eef51c581083),
                     color = Muted,
                     fontSize = 13.sp,
                     modifier = Modifier.align(Alignment.CenterHorizontally).padding(top = 6.dp, bottom = 8.dp)
                 )
             } else if (mandatoryDaily.isNotEmpty()) {
                 SectionLabel(
-                    "FÜR HEUTE GEPLANT",
+                    npString(R.string.np_c710983cc05f),
                     topPadding = if (orbit) 10.dp else 26.dp,
                     bottomPadding = if (orbit) 8.dp else 12.dp
                 )
@@ -1569,7 +1599,7 @@ private fun TodayScreen(
                         val c = count(rule)
                         val total = totalOf(rule)
                         val subtitle = when (rule.kind) {
-                            RuleKind.INTERVAL -> "Alle ${everyLabel(rule.everyMin)} · $c/$total"
+                            RuleKind.INTERVAL -> "Alle ${everyLabel(rule.everyMin)} · ${c}/${total}"
                             else -> dayLabel(rule.days)
                         }
                         val chip = when (rule.kind) {
@@ -1586,7 +1616,7 @@ private fun TodayScreen(
                             compact = orbit
                         ) { onToggle(rule) }
                         if (index < mandatoryDaily.lastIndex) {
-                            HorizontalDivider(color = Color(0xFF282828), modifier = Modifier.padding(start = 64.dp))
+                            HorizontalDivider(color = npNeutral(0xFF282828), modifier = Modifier.padding(start = 64.dp))
                         }
                     }
                 }
@@ -1594,7 +1624,7 @@ private fun TodayScreen(
 
             if (optionalDaily.isNotEmpty()) {
                 SectionLabel(
-                    "OPTIONAL · ZÄHLT NICHT ZUM TAGESSCORE",
+                    npString(R.string.np_f16dba575b22),
                     topPadding = if (orbit) 12.dp else 20.dp,
                     bottomPadding = if (orbit) 8.dp else 10.dp
                 )
@@ -1603,7 +1633,7 @@ private fun TodayScreen(
                         val c = count(rule)
                         val total = totalOf(rule)
                         val subtitle = when (rule.kind) {
-                            RuleKind.INTERVAL -> "Optional · Alle ${everyLabel(rule.everyMin)} · $c/$total"
+                            RuleKind.INTERVAL -> "Optional · Alle ${everyLabel(rule.everyMin)} · ${c}/${total}"
                             else -> "Optional · ${dayLabel(rule.days)}"
                         }
                         val chip = when (rule.kind) {
@@ -1620,7 +1650,7 @@ private fun TodayScreen(
                             compact = orbit
                         ) { onToggle(rule) }
                         if (index < optionalDaily.lastIndex) {
-                            HorizontalDivider(color = Color(0xFF282828), modifier = Modifier.padding(start = 64.dp))
+                            HorizontalDivider(color = npNeutral(0xFF282828), modifier = Modifier.padding(start = 64.dp))
                         }
                     }
                 }
@@ -1652,7 +1682,7 @@ private fun ProgressBars(done: Int, total: Int, ndot: FontFamily) {
         ) {
             DisplayCount(done, total, ndot, 84.sp)
             Text(
-                if (done == total) "GESCHAFFT" else "ERLEDIGT",
+                if (done == total) npString(R.string.np_595b69683dcf) else npString(R.string.np_71f43d0f0475),
                 color = Muted,
                 fontFamily = FontFamily.Default,
                 fontSize = 10.sp,
@@ -1668,7 +1698,7 @@ private fun ProgressBars(done: Int, total: Int, ndot: FontFamily) {
                         .weight(1f)
                         .height(10.dp)
                         .clip(RoundedCornerShape(5.dp))
-                        .background(if (total == 0 || i < done) White else Color(0xFF2A2A2A))
+                        .background(if (total == 0 || i < done) White else npNeutral(0xFF2A2A2A))
                 )
             }
         }
@@ -1700,7 +1730,7 @@ private fun ProgressOrbit(
                 repeat(total) { i ->
                     val segStart = startBase + i * stepDeg
                     drawArc(
-                        color = if (i < done) White else Color(0xFF2A2A2A),
+                        color = if (i < done) White else npNeutral(0xFF2A2A2A),
                         startAngle = segStart,
                         sweepAngle = sweepDeg,
                         useCenter = false,
@@ -1711,7 +1741,7 @@ private fun ProgressOrbit(
                 }
             } else {
                 drawArc(
-                    color = Color(0xFF242424),
+                    color = npNeutral(0xFF242424),
                     startAngle = -90f,
                     sweepAngle = 360f,
                     useCenter = false,
@@ -1733,7 +1763,7 @@ private fun ProgressOrbit(
         Column(horizontalAlignment = Alignment.CenterHorizontally) {
             DisplayCount(done, total, ndot, countFontSize)
             Text(
-                if (done == total) "GESCHAFFT" else "ERLEDIGT",
+                if (done == total) npString(R.string.np_595b69683dcf) else npString(R.string.np_71f43d0f0475),
                 color = Muted,
                 fontFamily = FontFamily.Default,
                 fontSize = 9.sp,
@@ -1777,14 +1807,14 @@ private fun CheckCircle(checked: Boolean, optional: Boolean = false) {
             )
         } else {
             drawCircle(
-                color = if (optional) Color(0xFF454545) else Color(0xFF5A5A5A),
+                color = if (optional) npNeutral(0xFF454545) else npNeutral(0xFF5A5A5A),
                 radius = radius,
                 center = center,
                 style = Stroke(width = strokePx)
             )
             if (optional) {
                 drawCircle(
-                    color = Color(0xFF5A5A5A),
+                    color = npNeutral(0xFF5A5A5A),
                     radius = 2.dp.toPx(),
                     center = center
                 )
@@ -1871,13 +1901,13 @@ private fun StepCounter(
         ) {
             Text(
                 "−",
-                color = if (canDec) White else Color(0xFF4C4C4C),
+                color = if (canDec) White else npNeutral(0xFF4C4C4C),
                 fontSize = 18.sp,
                 style = TextStyle(platformStyle = PlatformTextStyle(includeFontPadding = false))
             )
         }
         Text(
-            "$clamped / $safeTarget",
+            "${clamped} / ${safeTarget}",
             color = if (clamped >= safeTarget) Red else Color.LightGray,
             fontFamily = FontFamily.Default,
             fontSize = 16.sp,
@@ -1893,7 +1923,7 @@ private fun StepCounter(
         ) {
             Text(
                 "+",
-                color = if (canInc) Bg else Color(0xFF4C4C4C),
+                color = if (canInc) Bg else npNeutral(0xFF4C4C4C),
                 fontSize = 18.sp,
                 fontWeight = FontWeight.Medium,
                 style = TextStyle(platformStyle = PlatformTextStyle(includeFontPadding = false))
@@ -1937,7 +1967,7 @@ private fun WeeklyCard(
                         onStep = { delta -> onStepRule(rule, delta) }
                     )
                     if (index < weekly.lastIndex) {
-                        HorizontalDivider(color = Color(0xFF282828), modifier = Modifier.padding(start = 19.dp))
+                        HorizontalDivider(color = npNeutral(0xFF282828), modifier = Modifier.padding(start = 19.dp))
                     }
                 }
             }
@@ -1958,12 +1988,12 @@ private fun WeeklyRow(
     onStep: (Int) -> Unit
 ) {
     val weekDone = count >= target
-    val optSuffix = if (rule.optional) " · Optional" else ""
+    val optSuffix = if (rule.optional) npString(R.string.np_f7fb4627b990) else ""
     val statusText = when {
-        weekDone -> "Wochenziel erreicht ($target×/Woche)$optSuffix"
-        checkedToday && !testMode -> "Heute erledigt · $target× pro Woche$optSuffix"
-        testMode -> "Test-Modus aktiv · $target× pro Woche$optSuffix"
-        else -> "Flexibles Wochenziel · $target× pro Woche$optSuffix"
+        weekDone -> npString(R.string.np_d9da98f8078e , target, optSuffix)
+        checkedToday && !testMode -> npString(R.string.np_0acd32441928 , target, optSuffix)
+        testMode -> npString(R.string.np_e4e95c845760 , target, optSuffix)
+        else -> npString(R.string.np_21199640e8ea , target, optSuffix)
     }
     Row(
         Modifier
@@ -1991,7 +2021,7 @@ private fun WeeklyRow(
                     Box(
                         Modifier
                             .size(6.dp)
-                            .background(if (idx < count) Red else Color(0xFF333333), CircleShape)
+                            .background(if (idx < count) Red else npNeutral(0xFF333333), CircleShape)
                     )
                 }
             }
@@ -2024,15 +2054,15 @@ private fun HistoryScreen(
     var selectedDate by remember { mutableStateOf(today) }
 
     val subtitle = if (yearScope) {
-        "Jahresübersicht · $currentYear"
+        npString(R.string.np_606a26e6f91d , currentYear)
     } else {
-        currentMonth.atDay(1).format(DateTimeFormatter.ofPattern("MMMM yyyy", Locale.GERMAN))
+        currentMonth.atDay(1).format(DateTimeFormatter.ofPattern("MMMM yyyy", npLocale()))
     }
 
     Screen(
         ndot = ndot,
-        eyebrow = "JEDER TAG ZÄHLT.",
-        title = "RÜCKBLICK",
+        eyebrow = npString(R.string.np_47ed0cee9663),
+        title = npString(R.string.np_cd3f33f4efd7),
         subtitle = subtitle
     ) {
         Row(
@@ -2041,13 +2071,13 @@ private fun HistoryScreen(
             horizontalArrangement = Arrangement.SpaceBetween
         ) {
             Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
-                ChoiceChip("Monat", !yearScope, Modifier.width(82.dp)) {
+                ChoiceChip(npString(R.string.np_da13625eeb37), !yearScope, Modifier.width(82.dp)) {
                     if (yearScope) {
                         yearScope = false
                         onHapticTick()
                     }
                 }
-                ChoiceChip("Jahr", yearScope, Modifier.width(82.dp)) {
+                ChoiceChip(npString(R.string.np_956a6e5ab6c7), yearScope, Modifier.width(82.dp)) {
                     if (!yearScope) {
                         yearScope = true
                         currentYear = currentMonth.year
@@ -2077,13 +2107,13 @@ private fun HistoryScreen(
                     Modifier
                         .size(34.dp)
                         .clip(CircleShape)
-                        .background(if (canGoNext) Panel else Color(0xFF101010))
+                        .background(if (canGoNext) Panel else npNeutral(0xFF101010))
                         .clickable(enabled = canGoNext) {
                             if (yearScope) currentYear += 1 else currentMonth = currentMonth.plusMonths(1)
                             onHapticTick()
                         },
                     contentAlignment = Alignment.Center
-                ) { Text("›", color = if (canGoNext) White else Color(0xFF3A3A3A), fontSize = 18.sp) }
+                ) { Text("›", color = if (canGoNext) White else npNeutral(0xFF3A3A3A), fontSize = 18.sp) }
             }
         }
 
@@ -2110,14 +2140,14 @@ private fun HistoryScreen(
                         verticalAlignment = Alignment.CenterVertically
                     ) {
                         Text(
-                            currentMonth.atDay(1).format(DateTimeFormatter.ofPattern("MMMM yyyy", Locale.GERMAN)).uppercase(Locale.GERMAN),
+                            currentMonth.atDay(1).format(DateTimeFormatter.ofPattern("MMMM yyyy", npLocale())).uppercase(npLocale()),
                             color = White,
                             fontFamily = FontFamily.Default,
                             fontSize = 11.sp,
                             letterSpacing = 1.6.sp
                         )
                         Text(
-                            "$perfectDays perfekt · $activeDays aktiv",
+                            npString(R.string.np_c14c5be3b07e , perfectDays, activeDays),
                             color = Muted,
                             fontFamily = FontFamily.Default,
                             fontSize = 10.sp
@@ -2225,9 +2255,9 @@ private fun HistoryScreen(
 
             val (allYearSnaps, monthsList, counts) = yearData
             Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(10.dp)) {
-                MiniYearStat("PERFEKT", "${counts.first}", Red, Modifier.weight(1f), ndot)
+                MiniYearStat(npString(R.string.np_dba8c7f0f351), "${counts.first}", Red, Modifier.weight(1f), ndot)
                 MiniYearStat("TEILWEISE", "${counts.second}", White, Modifier.weight(1f), ndot)
-                MiniYearStat("OFFEN", "${counts.third}", Muted, Modifier.weight(1f), ndot)
+                MiniYearStat(npString(R.string.np_8f075c7e5cba), "${counts.third}", Muted, Modifier.weight(1f), ndot)
             }
 
             Spacer(Modifier.height(12.dp))
@@ -2256,10 +2286,10 @@ private fun HistoryScreen(
                                             val isSelected = snap.date == selectedDate
                                             val isToday = snap.date == today
                                             val dotColor = when {
-                                                isFuture -> Color(0xFF141414)
+                                                isFuture -> npNeutral(0xFF141414)
                                                 snap.state == DayCompletionState.ALL -> Red
                                                 snap.state == DayCompletionState.PARTIAL -> White
-                                                else -> Color(0xFF2B2B2B)
+                                                else -> npNeutral(0xFF2B2B2B)
                                             }
                                             Box(
                                                 modifier = Modifier
@@ -2269,7 +2299,7 @@ private fun HistoryScreen(
                                                     .then(
                                                         when {
                                                             isSelected -> Modifier.border(1.dp, White, CircleShape)
-                                                            isToday -> Modifier.border(1.dp, Color(0xFF5A5A5A), CircleShape)
+                                                            isToday -> Modifier.border(1.dp, npNeutral(0xFF5A5A5A), CircleShape)
                                                             else -> Modifier
                                                         }
                                                     )
@@ -2353,8 +2383,8 @@ private fun MonthDayCell(
         val dotColor = when (state) {
             DayCompletionState.ALL -> Red
             DayCompletionState.PARTIAL -> White
-            DayCompletionState.NONE -> Color(0xFF2D2D2D)
-            null -> Color(0xFF141414)
+            DayCompletionState.NONE -> npNeutral(0xFF2D2D2D)
+            null -> npNeutral(0xFF141414)
         }
         val dotSize = when (state) {
             DayCompletionState.ALL -> 13.dp
@@ -2368,7 +2398,7 @@ private fun MonthDayCell(
                 .clip(CircleShape)
                 .background(if (isSelected) Panel2 else Color.Transparent)
                 .then(
-                    if (isToday) Modifier.border(1.dp, Color(0xFF525252), CircleShape)
+                    if (isToday) Modifier.border(1.dp, npNeutral(0xFF525252), CircleShape)
                     else Modifier
                 ),
             contentAlignment = Alignment.Center
@@ -2383,14 +2413,14 @@ private fun MonthDayCell(
         val bgColor = when (state) {
             DayCompletionState.ALL -> Red
             DayCompletionState.PARTIAL -> Panel2
-            DayCompletionState.NONE -> Color(0xFF121212)
+            DayCompletionState.NONE -> npNeutral(0xFF121212)
             null -> Color.Transparent
         }
         val textColor = when (state) {
             DayCompletionState.ALL -> White
             DayCompletionState.PARTIAL -> White
             DayCompletionState.NONE -> Muted
-            null -> Color(0xFF333333)
+            null -> npNeutral(0xFF333333)
         }
         Box(
             modifier = modifier
@@ -2400,7 +2430,7 @@ private fun MonthDayCell(
                 .then(
                     when {
                         isSelected -> Modifier.border(1.5.dp, White, RoundedCornerShape(11.dp))
-                        isToday -> Modifier.border(1.dp, Color(0xFF555555), RoundedCornerShape(11.dp))
+                        isToday -> Modifier.border(1.dp, npNeutral(0xFF555555), RoundedCornerShape(11.dp))
                         else -> Modifier
                     }
                 ),
@@ -2408,7 +2438,7 @@ private fun MonthDayCell(
         ) {
             Column(horizontalAlignment = Alignment.CenterHorizontally) {
                 Text(
-                    "$dayNum",
+                    "${dayNum}",
                     color = textColor,
                     fontFamily = FontFamily.Default,
                     fontSize = 12.sp,
@@ -2431,7 +2461,7 @@ private fun YearMonthCard(
     today: LocalDate,
     modifier: Modifier = Modifier
 ) {
-    val monthName = ym.atDay(1).format(DateTimeFormatter.ofPattern("MMM", Locale.GERMAN)).uppercase(Locale.GERMAN)
+    val monthName = ym.atDay(1).format(DateTimeFormatter.ofPattern("MMM", npLocale())).uppercase(npLocale())
     val perfect = snaps.count { !it.date.isAfter(today) && it.state == DayCompletionState.ALL }
     val offset = ym.atDay(1).dayOfWeek.value - 1
     val totalCells = offset + ym.lengthOfMonth()
@@ -2456,7 +2486,7 @@ private fun YearMonthCard(
                     letterSpacing = 1.4.sp
                 )
                 Text(
-                    "$perfect/${ym.lengthOfMonth()}",
+                    "${perfect}/${ym.lengthOfMonth()}",
                     color = Muted,
                     fontFamily = FontFamily.Default,
                     fontSize = 9.sp
@@ -2473,10 +2503,10 @@ private fun YearMonthCard(
                                 val s = snaps[d - 1]
                                 val isFuture = s.date.isAfter(today)
                                 val cellColor = when {
-                                    isFuture -> Color(0xFF141414)
+                                    isFuture -> npNeutral(0xFF141414)
                                     s.state == DayCompletionState.ALL -> Red
                                     s.state == DayCompletionState.PARTIAL -> White
-                                    else -> Color(0xFF2B2B2B)
+                                    else -> npNeutral(0xFF2B2B2B)
                                 }
                                 Box(
                                     Modifier
@@ -2530,9 +2560,9 @@ private fun HistoryLegend() {
         horizontalArrangement = Arrangement.SpaceBetween,
         verticalAlignment = Alignment.CenterVertically
     ) {
-        LegendItem(Red, "Alle Pflichtziele")
+        LegendItem(Red, npString(R.string.np_f77edaf1cc27))
         LegendItem(White, "Teilweise")
-        LegendItem(Color(0xFF2D2D2D), "Kein Ziel")
+        LegendItem(npNeutral(0xFF2D2D2D), npString(R.string.np_b730f7bffbc0))
     }
 }
 
@@ -2552,14 +2582,14 @@ private fun DayDetailCard(
     ndot: FontFamily
 ) {
     val label = if (isToday) {
-        "HEUTE · ${snap.date.format(DateTimeFormatter.ofPattern("d. MMMM", Locale.GERMAN)).uppercase(Locale.GERMAN)}"
+        npString(R.string.np_97043bacc3aa , snap.date.format(DateTimeFormatter.ofPattern("d. MMMM", npLocale())).uppercase(npLocale()))
     } else {
-        snap.date.format(DateTimeFormatter.ofPattern("EEEE, d. MMMM", Locale.GERMAN)).uppercase(Locale.GERMAN)
+        snap.date.format(DateTimeFormatter.ofPattern("EEEE, d. MMMM", npLocale())).uppercase(npLocale())
     }
     val statusBadge = when (snap.state) {
-        DayCompletionState.ALL -> "ALLE PFLICHTZIELE ERREICHT"
-        DayCompletionState.PARTIAL -> "TEILWEISE"
-        DayCompletionState.NONE -> "KEIN ZIEL"
+        DayCompletionState.ALL -> npString(R.string.np_aa4654cc6edd)
+        DayCompletionState.PARTIAL -> npString(R.string.np_fae16c3927d1)
+        DayCompletionState.NONE -> npString(R.string.np_15815f5956d2)
     }
     val badgeColor = when (snap.state) {
         DayCompletionState.ALL -> Red
@@ -2583,14 +2613,14 @@ private fun DayDetailCard(
             }
 
             if (snap.historicalTasks.isNotEmpty()) {
-                HorizontalDivider(color = Color(0xFF282828), modifier = Modifier.padding(vertical = 12.dp))
+                HorizontalDivider(color = npNeutral(0xFF282828), modifier = Modifier.padding(vertical = 12.dp))
                 Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
                     snap.historicalTasks.forEach { item ->
                         val isDone = item.done >= item.target
                         Row(verticalAlignment = Alignment.CenterVertically) {
-                            Box(Modifier.size(7.dp).background(if (isDone) Red else Color(0xFF333333), CircleShape))
+                            Box(Modifier.size(7.dp).background(if (isDone) Red else npNeutral(0xFF333333), CircleShape))
                             Spacer(Modifier.width(10.dp))
-                            Text(item.name + if (item.optional) " (Optional)" else "", color = if (isDone) White else Muted,
+                            Text(item.name + if (item.optional) npString(R.string.np_f1a3cf2f741b) else "", color = if (isDone) White else Muted,
                                 fontSize = 13.sp, modifier = Modifier.weight(1f))
                             Text(if (isDone) "✓" else "${item.done}/${item.target}",
                                 color = if (isDone) Red else Muted, fontSize = 12.sp)
@@ -2598,7 +2628,7 @@ private fun DayDetailCard(
                     }
                 }
             } else if (snap.dailyRules.isNotEmpty() || snap.weeklyDoneRules.isNotEmpty()) {
-                HorizontalDivider(color = Color(0xFF282828), modifier = Modifier.padding(vertical = 12.dp))
+                HorizontalDivider(color = npNeutral(0xFF282828), modifier = Modifier.padding(vertical = 12.dp))
                 Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
                     snap.dailyRules.forEach { r ->
                         val isDone = doneCountFor(r, snap.date) >= totalOf(r)
@@ -2606,11 +2636,11 @@ private fun DayDetailCard(
                             Box(
                                 Modifier
                                     .size(7.dp)
-                                    .background(if (isDone) Red else Color(0xFF333333), CircleShape)
+                                    .background(if (isDone) Red else npNeutral(0xFF333333), CircleShape)
                             )
                             Spacer(Modifier.width(10.dp))
                             Text(
-                                if (r.optional) "${r.name} (Optional)" else r.name,
+                                if (r.optional) npString(R.string.np_4c8fecf40cb0 , r.name) else r.name,
                                 color = if (isDone) White else Muted,
                                 fontSize = 13.sp,
                                 modifier = Modifier.weight(1f)
@@ -2628,7 +2658,7 @@ private fun DayDetailCard(
                             Box(Modifier.size(7.dp).background(Red, CircleShape))
                             Spacer(Modifier.width(10.dp))
                             Text(
-                                if (w.optional) "${w.name} (Wochenziel · Optional)" else "${w.name} (Wochenziel)",
+                                if (w.optional) npString(R.string.np_1ecdf65a05c3 , w.name) else npString(R.string.np_0164e250ee12 , w.name),
                                 color = White,
                                 fontSize = 13.sp,
                                 modifier = Modifier.weight(1f)
@@ -2646,7 +2676,7 @@ private fun DayDetailCard(
 
 private fun suggestWorkoutName(existing: List<Workout>, selectedExercises: List<Exercise>): String {
     val now = java.time.LocalDateTime.now()
-    val day = listOf("Montag", "Dienstag", "Mittwoch", "Donnerstag", "Freitag", "Samstag", "Sonntag")[now.dayOfWeek.value - 1]
+    val day = listOf(npString(R.string.np_8bb0f19f592e), npString(R.string.np_b2ce6b5d7cb1), npString(R.string.np_ea3552526134), npString(R.string.np_7c3df2c5fe25), npString(R.string.np_0ca5853904f5), npString(R.string.np_85ad5644425c), npString(R.string.np_f8e9c756eaa2))[now.dayOfWeek.value - 1]
     val time = when (now.hour) {
         in 5..9 -> "Morgens"
         in 10..11 -> "Vormittags"
@@ -2654,12 +2684,12 @@ private fun suggestWorkoutName(existing: List<Workout>, selectedExercises: List<
         in 13..16 -> "Nachmittags"
         else -> "Abends"
     }
-    val base = "Workout • $day $time"
+    val base = npString(R.string.np_204a119419ae , day, time)
     val used = existing.map { it.name.trim() }.toSet()
     if (base !in used) return base
     var number = 2
-    while ("$base ($number)" in used) number++
-    return "$base ($number)"
+    while ("${base} (${number})" in used) number++
+    return "${base} (${number})"
 }
 
 private fun bestRecordText(ex: Exercise, logs: List<ExerciseLog>): Pair<String, String>? {
@@ -2671,15 +2701,15 @@ private fun bestRecordText(ex: Exercise, logs: List<ExerciseLog>): Pair<String, 
         }
         ExerciseKind.BODYWEIGHT -> {
             val best = logs.maxByOrNull { it.reps } ?: return null
-            "${best.reps} Wdh." to best.date
+            npString(R.string.np_6a8982ba88d0 , best.reps) to best.date
         }
         ExerciseKind.CARDIO -> {
             val best = logs.maxByOrNull { it.seconds } ?: return null
-            "${best.seconds / 60} Min." to best.date
+            npString(R.string.np_0e961ac28402 , best.seconds / 60) to best.date
         }
         ExerciseKind.AMRAP -> {
             val best = logs.maxByOrNull { it.reps } ?: return null
-            "${best.reps} Runden" to best.date
+            npString(R.string.np_7704a2ed7811 , best.reps) to best.date
         }
         ExerciseKind.TIMED -> {
             val best = if (ex.targetReps > 1) {
@@ -2687,7 +2717,7 @@ private fun bestRecordText(ex: Exercise, logs: List<ExerciseLog>): Pair<String, 
             } else {
                 logs.maxByOrNull { it.seconds }
             } ?: return null
-            val txt = if (best.reps > 1) "${best.reps} Wdh. · ${best.seconds}s" else "${best.seconds} Sek."
+            val txt = if (best.reps > 1) npString(R.string.np_dd9d4ca852da , best.reps, best.seconds) else npString(R.string.np_7f854c57c3cb , best.seconds)
             txt to best.date
         }
     }
@@ -2805,7 +2835,7 @@ private fun TrainingScreen(
             else java.text.SimpleDateFormat("yyyy-MM-dd HH:mm:ss", Locale.ROOT).format(java.util.Date(obj.optLong("endedAt")))
         }
     }
-    val exerciseComparator = remember { java.text.Collator.getInstance(Locale.GERMAN) }
+    val exerciseComparator = remember(NPlannerAppearance.language) { java.text.Collator.getInstance(npLocale()) }
     val visibleExercises = exercises.filter {
         (kindFilter == null || it.kind == kindFilter) && it.name.contains(exerciseQuery, ignoreCase = true)
     }.sortedWith(Comparator { a, b ->
@@ -2829,7 +2859,7 @@ private fun TrainingScreen(
     fun beginWorkout(id: String) {
         if (activeWorkoutSessionId == id) { openWorkoutId = id; return }
         if (activeWorkoutSessionId != null) {
-            Toast.makeText(context, "Bitte zuerst das laufende Workout beenden.", Toast.LENGTH_SHORT).show()
+            Toast.makeText(context, npString(R.string.np_bbfb23b841a2), Toast.LENGTH_SHORT).show()
             return
         }
         classicRunId = UUID.randomUUID().toString()
@@ -2839,12 +2869,12 @@ private fun TrainingScreen(
         sessionPrefs.edit().putString("active_workout", id).putLong("started_at", sessionStartedAt).apply()
         openWorkoutId = id
         if (workouts.firstOrNull { it.id == id }?.kind == WorkoutKind.AMRAP) {
-            val prefix = "amrap:$id:"
+            val prefix = "amrap:${id}:"
             if (sessionPrefs.getBoolean(prefix + "finished", false)) {
                 val rounds = sessionPrefs.getInt(prefix + "rounds", 0)
                 val completed = sessionPrefs.getInt(prefix + "index", 0)
-                val archiveKey = "amrap_result:${System.currentTimeMillis()}:$id"
-                sessionPrefs.edit().putString(archiveKey, "$rounds:$completed").apply()
+                val archiveKey = "amrap_result:${System.currentTimeMillis()}:${id}"
+                sessionPrefs.edit().putString(archiveKey, "${rounds}:${completed}").apply()
                 sessionPrefs.edit().remove(prefix + "finished").remove(prefix + "running")
                     .remove(prefix + "index").remove(prefix + "rounds")
                     .remove(prefix + "remaining").remove(prefix + "endAt").apply()
@@ -2871,7 +2901,7 @@ private fun TrainingScreen(
             val sets = (logs.filter { it.workoutId == finishedWorkout.id && it.sessionId == classicRunId } + persistedLogs).distinctBy { it.id }
             val result = workoutSessionSnapshot(finishedWorkout, exercises, sets, sessionStartedAt,
                 System.currentTimeMillis(), classicRunId)
-            resultPrefs.edit().putString("workout_session:$classicRunId", result.toString()).apply()
+            resultPrefs.edit().putString("workout_session:${classicRunId}", result.toString()).apply()
             resultRevision++
             selectedWorkoutResult = result
         }
@@ -2886,8 +2916,8 @@ private fun TrainingScreen(
     var editingExercise by remember { mutableStateOf<Exercise?>(null) }
     var showNewWorkoutDialog by remember { mutableStateOf(false) }
     var showTemplateManager by remember { mutableStateOf(false) }
-    var requestedStandardTemplate by remember { mutableStateOf<String?>(null) }
     var requestedPersonalTemplate by remember { mutableStateOf<String?>(null) }
+    var editingTemplateKey by remember { mutableStateOf<String?>(null) }
     var detailWorkoutId by remember { mutableStateOf<String?>(null) }
     var templateRevision by remember { mutableIntStateOf(0) }
     val templates = remember(templateRevision, showTemplateManager) {
@@ -2903,7 +2933,7 @@ private fun TrainingScreen(
         if (uri != null && pendingExerciseExport.isNotBlank()) {
             runCatching {
                 context.contentResolver.openOutputStream(uri)?.bufferedWriter()?.use { it.write(pendingExerciseExport) }
-            }.onFailure { Toast.makeText(context, "Export fehlgeschlagen.", Toast.LENGTH_SHORT).show() }
+            }.onFailure { Toast.makeText(context, npString(R.string.np_a9695d3efead), Toast.LENGTH_SHORT).show() }
         }
     }
     fun shareExercise(ex: Exercise) {
@@ -2912,7 +2942,7 @@ private fun TrainingScreen(
             context.startActivity(Intent.createChooser(Intent(Intent.ACTION_SEND).apply {
                 type = "text/plain"
                 putExtra(Intent.EXTRA_TEXT, payload)
-            }, "Übung teilen"))
+            }, npString(R.string.np_3e30e6838966)))
         }
     }
     var targetWorkoutForNewEx by remember { mutableStateOf<String?>(null) }
@@ -2924,14 +2954,14 @@ private fun TrainingScreen(
         val prompt = buildAiExercisePrompt()
         val clipboard = context.getSystemService(Context.CLIPBOARD_SERVICE) as? ClipboardManager
         clipboard?.setPrimaryClip(ClipData.newPlainText("NPlanner KI-Vorlage", prompt))
-        Toast.makeText(context, "KI-Vorlage kopiert – wähle eine KI-App", Toast.LENGTH_SHORT).show()
+        Toast.makeText(context, npString(R.string.np_1166fc3ed310), Toast.LENGTH_SHORT).show()
 
         val sendIntent = Intent(Intent.ACTION_SEND).apply {
             type = "text/plain"
-            putExtra(Intent.EXTRA_SUBJECT, "NPlanner Übung erstellen ($NPEF_FORMAT_ID)")
+            putExtra(Intent.EXTRA_SUBJECT, "NPlanner Übung erstellen (${NPEF_FORMAT_ID})")
             putExtra(Intent.EXTRA_TEXT, prompt)
         }
-        val chooser = Intent.createChooser(sendIntent, "Übung mithilfe KI anlegen").apply {
+        val chooser = Intent.createChooser(sendIntent, npString(R.string.np_96fc72d1a322)).apply {
             addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
         }
         runCatching { context.startActivity(chooser) }
@@ -2939,28 +2969,28 @@ private fun TrainingScreen(
 
     Screen(
         ndot = ndot,
-        eyebrow = "WORKOUTS & PROGRESSION.",
-        title = "TRAINING",
-        subtitle = "${if (activeWorkoutSessionId != null) "1 aktives Workout" else "Kein aktives Workout"} · ${pastWorkouts.size + amrapResults.size} vergangene Einheiten"
+        eyebrow = npString(R.string.np_d30ed0e05d1b),
+        title = npString(R.string.np_78db94f73df9),
+        subtitle = npString(R.string.np_40641d40924f , if (activeWorkoutSessionId != null) npString(R.string.np_3f85c2f7419d) else npString(R.string.np_57fce7be21d3), pastWorkouts.size + amrapResults.size)
     ) {
         // Subtile Unterseiten-Navigation: Workouts | Übungen | Rekorde
         Row(
             Modifier.fillMaxWidth(),
             horizontalArrangement = Arrangement.spacedBy(6.dp)
         ) {
-            ChoiceChip("Workouts", subPage == 0, Modifier.weight(1f)) {
+            ChoiceChip(npString(R.string.np_ccb58b229959), subPage == 0, Modifier.weight(1f)) {
                 if (subPage != 0) {
                     subPage = 0
                     onHapticTick()
                 }
             }
-            ChoiceChip("Übungen", subPage == 1, Modifier.weight(1f)) {
+            ChoiceChip(npString(R.string.np_bd0ffd87acdf), subPage == 1, Modifier.weight(1f)) {
                 if (subPage != 1) {
                     subPage = 1
                     onHapticTick()
                 }
             }
-            ChoiceChip("Rekorde", subPage == 2, Modifier.weight(1f)) {
+            ChoiceChip(npString(R.string.np_6a1cae58339e), subPage == 2, Modifier.weight(1f)) {
                 if (subPage != 2) {
                     subPage = 2
                     onHapticTick()
@@ -2980,10 +3010,10 @@ private fun TrainingScreen(
                         Box(Modifier.size(8.dp).background(Red, CircleShape))
                         Spacer(Modifier.width(12.dp))
                         Column(Modifier.weight(1f)) {
-                            Text("TRAINING LÄUFT", color = Red, fontSize = 10.sp, fontFamily = FontFamily.Default)
+                            Text(npString(R.string.np_3d6849f8dec5), color = Red, fontSize = 10.sp, fontFamily = FontFamily.Default)
                             Text(running.name, color = White, fontSize = 14.sp)
                         }
-                        Text("ÖFFNEN ›", color = White, fontSize = 11.sp)
+                        Text(npString(R.string.np_d3a0c92f97e5), color = White, fontSize = 11.sp)
                     }
                 }
                 Spacer(Modifier.height(12.dp))
@@ -2995,42 +3025,42 @@ private fun TrainingScreen(
             0 -> {
                 Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(10.dp)) {
                     Surface(color = White, shape = RoundedCornerShape(18.dp), modifier = Modifier.weight(1f).clickable {
-                        requestedStandardTemplate = null
+
                         requestedPersonalTemplate = null
                         showNewWorkoutDialog = true
                     }) {
                         Column(Modifier.padding(15.dp)) {
-                            Text("+ NEUES WORKOUT", color = Bg, fontSize = 12.sp)
-                            Text("Selbst zusammenstellen", color = Color(0xFF555555), fontSize = 10.sp)
+                            Text(npString(R.string.np_08a05cd11652), color = Bg, fontSize = 12.sp)
+                            Text(npString(R.string.np_7a61498caf47), color = npNeutral(0xFF555555), fontSize = 10.sp)
                         }
                     }
                     Surface(color = Panel2, shape = RoundedCornerShape(18.dp), modifier = Modifier.weight(1f).clickable {
                         showTemplateManager = true
                     }) {
                         Column(Modifier.padding(15.dp)) {
-                            Text("VORLAGEN", color = White, fontSize = 12.sp)
-                            Text("Wählen · verwalten · löschen", color = Muted, fontSize = 10.sp)
+                            Text(npString(R.string.np_7e022f02cec6), color = White, fontSize = 12.sp)
+                            Text(npString(R.string.np_4c5118cd65ed), color = Muted, fontSize = 10.sp)
                         }
                     }
                 }
-                SectionLabel("VERGANGENE WORKOUTS", topPadding = 22.dp, bottomPadding = 10.dp)
-                if (pastWorkouts.isEmpty()) Text("Abgeschlossene Workouts erscheinen hier.", color = Muted, fontSize = 12.sp)
+                SectionLabel(npString(R.string.np_7238de321955), topPadding = 22.dp, bottomPadding = 10.dp)
+                if (pastWorkouts.isEmpty()) Text(npString(R.string.np_761fc34088c6), color = Muted, fontSize = 12.sp)
                 pastWorkouts.forEach { result ->
                     Surface(color = Panel, shape = RoundedCornerShape(20.dp),
                         modifier = Modifier.fillMaxWidth().padding(vertical = 4.dp).clickable { selectedWorkoutResult = result }) {
                         Row(Modifier.padding(15.dp), verticalAlignment = Alignment.CenterVertically) {
                             Column(Modifier.weight(1f)) {
                                 Text(result.optString("name"), color = White, fontSize = 15.sp)
-                                Text(if (result.optBoolean("legacy")) result.optString("legacyDate") + " · ältere Tagesaufzeichnung"
-                                    else java.text.SimpleDateFormat("dd.MM.yyyy HH:mm", Locale.GERMAN).format(java.util.Date(result.optLong("endedAt"))),
+                                Text(if (result.optBoolean("legacy")) result.optString("legacyDate") + npString(R.string.np_82d36c5ed290)
+                                    else java.text.SimpleDateFormat("dd.MM.yyyy HH:mm", npLocale()).format(java.util.Date(result.optLong("endedAt"))),
                                     color = Muted, fontSize = 11.sp)
                             }
-                            Text("${result.optInt("setCount")} Sätze  ›", color = White, fontSize = 12.sp)
+                            Text(npString(R.string.np_85b7821c3553 , result.optInt("setCount")), color = White, fontSize = 12.sp)
                         }
                     }
                 }
                 Spacer(Modifier.height(18.dp))
-                SectionLabel("WORKOUTS VORBEREITEN", topPadding = 6.dp, bottomPadding = 10.dp)
+                SectionLabel(npString(R.string.np_9bf3182032ce), topPadding = 6.dp, bottomPadding = 10.dp)
                 if (workouts.none { it.kind != WorkoutKind.AMRAP && it.id != activeWorkoutSessionId }) {
                     Surface(
                         color = Panel,
@@ -3039,16 +3069,16 @@ private fun TrainingScreen(
                             .fillMaxWidth()
                             .clickable {
                                 onHapticTick()
-                                requestedStandardTemplate = null
+
                         requestedPersonalTemplate = null
                         showNewWorkoutDialog = true
                             }
                     ) {
                         Column(Modifier.padding(22.dp)) {
-                            Text("Noch kein Workout erstellt", color = White, fontSize = 16.sp, fontWeight = FontWeight.Medium)
+                            Text(npString(R.string.np_1c8383eed46b), color = White, fontSize = 16.sp, fontWeight = FontWeight.Medium)
                             Spacer(Modifier.height(6.dp))
                             Text(
-                                "Klassische Workouts erscheinen hier. AMRAP-Ergebnisse findest du im AMRAP-Verlauf.",
+                                npString(R.string.np_ee3a19e84698),
                                 color = Muted,
                                 fontSize = 12.sp,
                                 lineHeight = 17.sp
@@ -3061,7 +3091,7 @@ private fun TrainingScreen(
                                     .padding(horizontal = 16.dp, vertical = 10.dp)
                             ) {
                                 Text(
-                                    "+ WORKOUT ANLEGEN",
+                                    npString(R.string.np_9f521292df82),
                                     color = Bg,
                                     fontFamily = FontFamily.Default,
                                     fontSize = 11.sp,
@@ -3095,7 +3125,7 @@ private fun TrainingScreen(
                                     Box(
                                         Modifier
                                             .size(8.dp)
-                                            .background(if (isThisWorkoutActive) Red else Color(0xFF3A3A3A), CircleShape)
+                                            .background(if (isThisWorkoutActive) Red else npNeutral(0xFF3A3A3A), CircleShape)
                                     )
                                     Spacer(Modifier.width(14.dp))
                                     Column(Modifier.weight(1f)) {
@@ -3111,7 +3141,7 @@ private fun TrainingScreen(
                                         }
                                         Spacer(Modifier.height(4.dp))
                                         val previewNames = if (wExercises.isEmpty()) {
-                                            "Tippen, um Übungen hinzuzufügen"
+                                            npString(R.string.np_6f7a59eef1d7)
                                         } else {
                                             wExercises.take(3).joinToString(" · ") { it.name } +
                                                 if (wExercises.size > 3) " +${wExercises.size - 3}" else ""
@@ -3139,7 +3169,7 @@ private fun TrainingScreen(
                 }
 
                 if (amrapResults.isNotEmpty()) {
-                    SectionLabel("AMRAP-VERLAUF", topPadding = 20.dp, bottomPadding = 10.dp)
+                    SectionLabel(npString(R.string.np_15baed2cabe0), topPadding = 20.dp, bottomPadding = 10.dp)
                     amrapResults.forEach { result ->
                         AmrapResultCard(result, ndot) { selectedAmrapResult = result }
                     }
@@ -3152,7 +3182,7 @@ private fun TrainingScreen(
                     horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                     OutlinedTextField(
                         exerciseQuery, { exerciseQuery = it },
-                        label = { Text("Übungen durchsuchen") }, singleLine = true,
+                        label = { Text(npString(R.string.np_d8650daa10f4)) }, singleLine = true,
                         modifier = Modifier.weight(1f)
                     )
                     Surface(color = Panel2, shape = RoundedCornerShape(14.dp),
@@ -3162,9 +3192,9 @@ private fun TrainingScreen(
                         }
                     }
                 }
-                Text("${visibleExercises.size} ÜBUNGEN · " +
-                    (if (groupExercises) "NACH ART" else "ALLE ARTEN") + " · " +
-                    (if (exerciseDescending) "Z–A" else "A–Z"),
+                Text(npString(R.string.np_5600339b66ff , visibleExercises.size) +
+                    (if (groupExercises) npString(R.string.np_370d44de0e4f) else npString(R.string.np_8917bbe624ec)) + " · " +
+                    (if (exerciseDescending) npString(R.string.np_3d0a383079cf) else npString(R.string.np_20ec7e3ddab7)),
                     color = Muted, fontFamily = FontFamily.Default, fontSize = 10.sp,
                     modifier = Modifier.padding(top = 8.dp, bottom = 10.dp))
                 Row(
@@ -3185,7 +3215,7 @@ private fun TrainingScreen(
                     ) {
                         Box(contentAlignment = Alignment.Center) {
                             Text(
-                                "+ ÜBUNG",
+                                npString(R.string.np_9efdcfb98021),
                                 color = Bg,
                                 fontFamily = FontFamily.Default,
                                 fontSize = 11.sp,
@@ -3211,7 +3241,7 @@ private fun TrainingScreen(
                             Box(Modifier.size(6.dp).background(Red, CircleShape))
                             Spacer(Modifier.width(6.dp))
                             Text(
-                                "MIT KI ANLEGEN",
+                                npString(R.string.np_8d255d3f1bd7),
                                 color = White,
                                 fontFamily = FontFamily.Default,
                                 fontSize = 10.sp,
@@ -3223,12 +3253,12 @@ private fun TrainingScreen(
 
                 }
 
-                SectionLabel("ÜBUNGSBIBLIOTHEK", topPadding = 14.dp, bottomPadding = 10.dp)
+                SectionLabel(npString(R.string.np_af9f8f9cf25b), topPadding = 14.dp, bottomPadding = 10.dp)
 
                 if (visibleExercises.isEmpty()) {
                     Surface(color = Panel, shape = RoundedCornerShape(22.dp), modifier = Modifier.fillMaxWidth()) {
                         Text(
-                            "Keine passenden Übungen gefunden.",
+                            npString(R.string.np_17cbec673e17),
                             color = Muted,
                             fontSize = 12.sp,
                             modifier = Modifier.padding(18.dp)
@@ -3238,7 +3268,7 @@ private fun TrainingScreen(
                     Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
                         visibleExercises.forEachIndexed { index, ex ->
                             if (groupExercises && (index == 0 || visibleExercises[index - 1].kind != ex.kind)) {
-                                SectionLabel(exerciseKindLabel(ex.kind).uppercase(Locale.GERMAN), topPadding = 10.dp, bottomPadding = 6.dp)
+                                SectionLabel(exerciseKindLabel(ex.kind).uppercase(npLocale()), topPadding = 10.dp, bottomPadding = 6.dp)
                             }
                             val exLogs = logs.filter { it.exerciseId == ex.id }
                             val lastLog = exLogs.lastOrNull()
@@ -3274,7 +3304,7 @@ private fun TrainingScreen(
                                         if (lastLog != null) {
                                             Spacer(Modifier.height(2.dp))
                                             Text(
-                                                "Zuletzt: ${logSummary(ex, lastLog)}",
+                                                npString(R.string.np_c60937ec6f6d , logSummary(ex, lastLog)),
                                                 color = Color(0xFFB4B4B0),
                                                 fontFamily = FontFamily.Default,
                                                 fontSize = 10.sp
@@ -3304,7 +3334,7 @@ private fun TrainingScreen(
                             Row(verticalAlignment = Alignment.CenterVertically) {
                                 Box(Modifier.size(6.dp).background(Red, CircleShape))
                                 Spacer(Modifier.width(7.dp))
-                                Text("REKORDE", color = Muted, fontFamily = FontFamily.Default, fontSize = 9.sp, letterSpacing = 1.4.sp)
+                                Text(npString(R.string.np_eb3f070bc197), color = Muted, fontFamily = FontFamily.Default, fontSize = 9.sp, letterSpacing = 1.4.sp)
                             }
                             Spacer(Modifier.height(8.dp))
                             DisplayTitle("${records.size + amrapResults.map { it.optString("signature") }.distinct().size}", ndot, fontSize = 32.sp)
@@ -3315,7 +3345,7 @@ private fun TrainingScreen(
                             Row(verticalAlignment = Alignment.CenterVertically) {
                                 Box(Modifier.size(6.dp).background(White, CircleShape))
                                 Spacer(Modifier.width(7.dp))
-                                Text("SÄTZE GESAMT", color = Muted, fontFamily = FontFamily.Default, fontSize = 9.sp, letterSpacing = 1.4.sp)
+                                Text(npString(R.string.np_dadafe9ea717), color = Muted, fontFamily = FontFamily.Default, fontSize = 9.sp, letterSpacing = 1.4.sp)
                             }
                             Spacer(Modifier.height(8.dp))
                             DisplayTitle("${logs.size}", ndot, fontSize = 32.sp)
@@ -3330,7 +3360,7 @@ private fun TrainingScreen(
                 @Composable
                 fun RecordGroup(title: String, entries: List<Triple<Exercise, String, String>>) {
                     SectionLabel(title, topPadding = 18.dp, bottomPadding = 10.dp)
-                    if (entries.isEmpty()) Text("Noch keine Bestleistung gespeichert.", color = Muted, fontSize = 12.sp)
+                    if (entries.isEmpty()) Text(npString(R.string.np_17e45c81cc42), color = Muted, fontSize = 12.sp)
                     Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
                         entries.sortedBy { it.first.name.lowercase(Locale.GERMAN) }.forEach { (ex, value, day) ->
                             Surface(color = Panel, shape = RoundedCornerShape(20.dp), modifier = Modifier.fillMaxWidth().clickable {
@@ -3350,12 +3380,12 @@ private fun TrainingScreen(
                         }
                     }
                 }
-                RecordGroup("01  KRAFTTRAINING", strength)
-                RecordGroup("02  CARDIO", cardio)
-                SectionLabel("03  AMRAP", topPadding = 18.dp, bottomPadding = 10.dp)
-                if (amrapBests.isEmpty()) Text("Noch keine AMRAP-Bestleistung gespeichert.", color = Muted, fontSize = 12.sp)
+                RecordGroup(npString(R.string.np_84415f0defd3), strength)
+                RecordGroup(npString(R.string.np_3e0f7ed18a84), cardio)
+                SectionLabel(npString(R.string.np_fca4530c0eb9), topPadding = 18.dp, bottomPadding = 10.dp)
+                if (amrapBests.isEmpty()) Text(npString(R.string.np_73a8664f0b43), color = Muted, fontSize = 12.sp)
                 amrapBests.forEach { result -> AmrapResultCard(result, ndot) { selectedAmrapResult = result } }
-                if (amrapBests.isNotEmpty()) Text("Vergleich je gleicher Workout-Konfiguration. Vorzeitig beendete Einheiten sind gekennzeichnet.",
+                if (amrapBests.isNotEmpty()) Text(npString(R.string.np_4d62cf662110),
                     color = Muted, fontSize = 10.sp)
             }
         }
@@ -3365,16 +3395,16 @@ private fun TrainingScreen(
     pendingHistoryDelete?.let { (isAmrap, result) ->
         AlertDialog(
             onDismissRequest = { pendingHistoryDelete = null }, containerColor = Panel,
-            title = { DisplayTitle("TRAINING LÖSCHEN?", ndot, fontSize = 24.sp) },
+            title = { DisplayTitle(npString(R.string.np_e00b9ebf7918), ndot, fontSize = 24.sp) },
             text = { Text(if (isAmrap)
-                "Diese AMRAP-Einheit wird aus Verlauf und Rekorden entfernt. Vorlagen bleiben erhalten."
+                npString(R.string.np_06bbdee649e4)
                 else if (result.optBoolean("legacy"))
-                "Diese ältere Tagesaufzeichnung und alle zugehörigen Sätze dieses Workouts an diesem Tag werden gelöscht. Rekorde werden neu berechnet. Vorlagen bleiben erhalten."
-                else "Diese Trainingseinheit und ihre Sätze werden gelöscht. Rekorde werden neu berechnet. Workouts und Vorlagen bleiben erhalten.", color = Muted) },
+                npString(R.string.np_850b0e521c71)
+                else npString(R.string.np_c235598fe990), color = Muted) },
             confirmButton = { TextButton(onClick = {
                 val runId = result.optString("runId")
                 if (isAmrap) {
-                    resultPrefs.edit().remove("amrap_session:$runId").apply()
+                    resultPrefs.edit().remove("amrap_session:${runId}").apply()
                     selectedAmrapResult = null
                 } else {
                     val storedIds = result.optJSONArray("logIds")
@@ -3385,13 +3415,13 @@ private fun TrainingScreen(
                         else log.sessionId == runId && log.workoutId == result.optString("workoutId")
                     }.map { it.id }.toSet()
                     onDeleteSessionLogs(ids)
-                    resultPrefs.edit().remove("workout_session:$runId").apply()
+                    resultPrefs.edit().remove("workout_session:${runId}").apply()
                     selectedWorkoutResult = null
                 }
                 resultRevision++
                 pendingHistoryDelete = null
-            }) { Text("Endgültig löschen", color = Red) } },
-            dismissButton = { TextButton(onClick = { pendingHistoryDelete = null }) { Text("Abbrechen") } }
+            }) { Text(npString(R.string.np_9df6718de96c), color = Red) } },
+            dismissButton = { TextButton(onClick = { pendingHistoryDelete = null }) { Text(npString(R.string.np_07af7cb30fca)) } }
         )
     }
 
@@ -3461,7 +3491,7 @@ private fun TrainingScreen(
                         targetWeights = workout.targetWeights + latest.mapValues { it.value.weightKg }
                     )
                     savePersonalWorkoutTemplate(context, snapshot, exercises)
-                    Toast.makeText(context, "Eigene Vorlage gespeichert", Toast.LENGTH_SHORT).show()
+                    Toast.makeText(context, npString(R.string.np_eafdd7e6d735), Toast.LENGTH_SHORT).show()
                 },
                 onQuickLog = { log -> onLogSet(log.copy(workoutId = workout.id)) },
                 onEditWorkout = {
@@ -3484,7 +3514,7 @@ private fun TrainingScreen(
         } else {
             AlertDialog(
                 onDismissRequest = { showAddExistingExercise = false },
-                title = { Text("ÜBUNG HINZUFÜGEN", color = White) },
+                title = { Text(npString(R.string.np_98ed891e604b), color = White) },
                 text = {
                     Column(Modifier.heightIn(max = 360.dp).verticalScroll(rememberScrollState())) {
                         exercises.filterNot { it.id in current.exerciseIds }.forEach { ex ->
@@ -3499,7 +3529,7 @@ private fun TrainingScreen(
                         }
                     }
                 },
-                confirmButton = { TextButton(onClick = { showAddExistingExercise = false }) { Text("Schließen") } },
+                confirmButton = { TextButton(onClick = { showAddExistingExercise = false }) { Text(npString(R.string.np_44424b18700e)) } },
                 containerColor = Panel
             )
         }
@@ -3509,28 +3539,40 @@ private fun TrainingScreen(
         WorkoutTemplateManager(
             ndot = ndot, templates = templates,
             onDismiss = { showTemplateManager = false },
-            onStandard = { preset ->
-                requestedStandardTemplate = preset.title
-                requestedPersonalTemplate = null
-                showTemplateManager = false
-                showNewWorkoutDialog = true
-            },
             onPersonal = { key ->
-                requestedStandardTemplate = null
+
                 requestedPersonalTemplate = key
                 showTemplateManager = false
                 showNewWorkoutDialog = true
             },
-            onRename = { key, name ->
-                resultPrefs.getString(key, null)?.let { raw ->
-                    runCatching { JSONObject(raw) }.getOrNull()?.let { obj ->
-                        resultPrefs.edit().putString(key, obj.put("name", name).toString()).apply()
-                        templateRevision++
-                    }
-                }
+            onEdit = { key ->
+                showTemplateManager = false
+                editingTemplateKey = key
             },
             onDelete = { key -> resultPrefs.edit().remove(key).apply(); templateRevision++ }
         )
+    }
+
+    editingTemplateKey?.let { templateKey ->
+        key(templateKey) {
+            WorkoutEditorDialog(
+                ndot = ndot, title = "VORLAGE BEARBEITEN",
+                initialName = "", initialNote = "", initialPersonalKey = templateKey,
+                editingTemplate = true,
+                initialSelectedIds = emptySet(), initialKind = WorkoutKind.CLASSIC,
+                initialDurationSeconds = 0, existingWorkouts = workouts,
+                allExercises = exercises, isNew = false,
+                onAddPresetExercises = { missing -> onImportExercises(missing, null) },
+                onDismiss = { editingTemplateKey = null; showTemplateManager = true },
+                onSave = { name, note, ids, kind, seconds, targets, weights ->
+                    val w = Workout("template-edit", name, ids, note, kind, seconds, targets, weights)
+                    savePersonalWorkoutTemplate(context, w, exercises, templateKey)
+                    templateRevision++
+                    editingTemplateKey = null
+                    showTemplateManager = true
+                }
+            )
+        }
     }
 
     if (showNewWorkoutDialog) {
@@ -3539,7 +3581,6 @@ private fun TrainingScreen(
             title = "NEUES WORKOUT",
             initialName = suggestWorkoutName(workouts, emptyList()),
             initialNote = "",
-            initialPresetName = requestedStandardTemplate,
             initialPersonalKey = requestedPersonalTemplate,
             initialSelectedIds = emptySet(),
             initialKind = WorkoutKind.CLASSIC,
@@ -3551,7 +3592,7 @@ private fun TrainingScreen(
             onDismiss = { showNewWorkoutDialog = false },
             onSave = createWorkout@ { finalName, note, selectedIds, kind, durationSeconds, targets, weights ->
                 if (kind == WorkoutKind.AMRAP && activeWorkoutSessionId != null) {
-                    Toast.makeText(context, "Bitte zuerst das laufende Workout beenden.", Toast.LENGTH_SHORT).show()
+                    Toast.makeText(context, npString(R.string.np_bbfb23b841a2), Toast.LENGTH_SHORT).show()
                     return@createWorkout
                 }
                 val created = Workout(
@@ -3690,10 +3731,10 @@ private fun TrainingScreen(
         AlertDialog(
             onDismissRequest = { showExerciseFilters = false },
             containerColor = Panel, shape = RoundedCornerShape(26.dp),
-            title = { DisplayTitle("FILTER", ndot, fontSize = 25.sp) },
+            title = { DisplayTitle(npString(R.string.np_edc5934c34a6), ndot, fontSize = 25.sp) },
             text = {
                 Column {
-                    Text("ÜBUNGSART", color = Muted, fontSize = 10.sp, fontFamily = FontFamily.Default)
+                    Text(npString(R.string.np_4a79bcf07989), color = Muted, fontSize = 10.sp, fontFamily = FontFamily.Default)
                     Spacer(Modifier.height(8.dp))
                     Column(Modifier.heightIn(max = 235.dp).verticalScroll(rememberScrollState())) {
                         (listOf<ExerciseKind?>(null) + ExerciseKind.values().toList()).forEach { kind ->
@@ -3701,48 +3742,48 @@ private fun TrainingScreen(
                                 verticalAlignment = Alignment.CenterVertically) {
                                 Text(if (kindFilter == kind) "●" else "○", color = if (kindFilter == kind) Red else Muted)
                                 Spacer(Modifier.width(12.dp))
-                                Text(kind?.let { exerciseKindLabel(it) } ?: "Alle Übungsarten", color = White)
+                                Text(kind?.let { exerciseKindLabel(it) } ?: npString(R.string.np_445434ebfa2e), color = White)
                             }
                         }
                     }
-                    HorizontalDivider(color = Color(0xFF303030))
+                    HorizontalDivider(color = npNeutral(0xFF303030))
                     Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
-                        Text("Name absteigend (Z–A)", color = White, modifier = Modifier.weight(1f), fontSize = 13.sp)
+                        Text(npString(R.string.np_8e6c596cbe42), color = White, modifier = Modifier.weight(1f), fontSize = 13.sp)
                         Switch(checked = exerciseDescending, onCheckedChange = { exerciseDescending = it })
                     }
                     Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
-                        Text("Nach Übungsart gruppieren", color = White, modifier = Modifier.weight(1f), fontSize = 13.sp)
+                        Text(npString(R.string.np_3c1c7a067895), color = White, modifier = Modifier.weight(1f), fontSize = 13.sp)
                         Switch(checked = groupExercises, onCheckedChange = { groupExercises = it })
                     }
                 }
             },
-            confirmButton = { TextButton(onClick = { showExerciseFilters = false }) { Text("Übernehmen") } },
+            confirmButton = { TextButton(onClick = { showExerciseFilters = false }) { Text(npString(R.string.np_594308426372)) } },
             dismissButton = { TextButton(onClick = {
                 kindFilter = null; exerciseDescending = false; groupExercises = true; showExerciseFilters = false
-            }) { Text("Zurücksetzen") } }
+            }) { Text(npString(R.string.np_a4565af537e2)) } }
         )
     }
     if (showAiExerciseMenu) {
         AlertDialog(
             onDismissRequest = { showAiExerciseMenu = false },
             containerColor = Panel, shape = RoundedCornerShape(26.dp),
-            title = { DisplayTitle("MIT KI ANLEGEN", ndot, fontSize = 24.sp) },
+            title = { DisplayTitle(npString(R.string.np_8d255d3f1bd7), ndot, fontSize = 24.sp) },
             text = {
                 Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
                     Surface(color = Panel2, shape = RoundedCornerShape(16.dp),
                         modifier = Modifier.fillMaxWidth().clickable {
                             showAiExerciseMenu = false
                             shareAiPromptToExternalApp()
-                        }) { Text("KI-Prompt erstellen  ↗", color = White, modifier = Modifier.padding(16.dp)) }
+                        }) { Text(npString(R.string.np_7a9f1f7e8ce8), color = White, modifier = Modifier.padding(16.dp)) }
                     Surface(color = Panel2, shape = RoundedCornerShape(16.dp),
                         modifier = Modifier.fillMaxWidth().clickable {
                             showAiExerciseMenu = false
                             targetWorkoutForNewEx = null
                             showAiImportDialog = true
-                        }) { Text("JSON importieren  ↗", color = White, modifier = Modifier.padding(16.dp)) }
+                        }) { Text(npString(R.string.np_0e20248ad581), color = White, modifier = Modifier.padding(16.dp)) }
                 }
             },
-            confirmButton = { TextButton(onClick = { showAiExerciseMenu = false }) { Text("Schließen") } }
+            confirmButton = { TextButton(onClick = { showAiExerciseMenu = false }) { Text(npString(R.string.np_44424b18700e)) } }
         )
     }
     if (showAiImportDialog) {
@@ -3762,7 +3803,7 @@ private fun TrainingScreen(
 }
 
 private fun amrapScoreText(r: JSONObject): String =
-    "${r.optInt("rounds")} Runden + ${r.optInt("extraExercises")} Übungen"
+    npString(R.string.np_10f171af156d , r.optInt("rounds"), r.optInt("extraExercises"))
 
 @Composable
 private fun AmrapResultCard(result: JSONObject, ndot: FontFamily, onClick: () -> Unit) {
@@ -3771,8 +3812,8 @@ private fun AmrapResultCard(result: JSONObject, ndot: FontFamily, onClick: () ->
         Column(Modifier.padding(15.dp)) {
             Text(result.optString("name"), color = White, fontSize = 16.sp)
             Text(amrapScoreText(result), color = Red, fontSize = 13.sp)
-            Text(java.text.SimpleDateFormat("dd.MM.yyyy HH:mm", Locale.GERMAN).format(java.util.Date(result.optLong("endedAt"))) +
-                if (result.optBoolean("completed")) " · Abgeschlossen" else " · Vorzeitig beendet", color = Muted, fontSize = 11.sp)
+            Text(java.text.SimpleDateFormat("dd.MM.yyyy HH:mm", npLocale()).format(java.util.Date(result.optLong("endedAt"))) +
+                if (result.optBoolean("completed")) npString(R.string.np_2453a761b048) else npString(R.string.np_3448fa26997a), color = Muted, fontSize = 11.sp)
         }
     }
 }
@@ -3790,25 +3831,25 @@ private fun AmrapSummaryDialog(result: JSONObject, ndot: FontFamily, onDelete: (
                 Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
                     Box(Modifier.size(7.dp).background(Red, CircleShape))
                     Spacer(Modifier.width(9.dp))
-                    Text("TRAININGSERGEBNIS", color = Muted, fontFamily = FontFamily.Default,
+                    Text(npString(R.string.np_34a7f3d134eb), color = Muted, fontFamily = FontFamily.Default,
                         fontSize = 10.sp, letterSpacing = 1.4.sp, modifier = Modifier.weight(1f))
                     if (onDelete != null) IconButton(onClick = onDelete,
-                        modifier = Modifier.semantics { contentDescription = "Vergangenes AMRAP löschen" }) {
+                        modifier = Modifier.semantics { contentDescription = npString(R.string.np_c80854a748cc) }) {
                         WorkoutActionIcon(WorkoutAction.DELETE, Red)
                     }
                 }
-                DisplayTitle(result.optString("name").uppercase(Locale.GERMAN), ndot, fontSize = 26.sp)
-                Text(if (completed) "ZEIT ABGELAUFEN · GESPEICHERT" else "VORZEITIG BEENDET · GESPEICHERT",
+                DisplayTitle(result.optString("name").uppercase(npLocale()), ndot, fontSize = 26.sp)
+                Text(if (completed) npString(R.string.np_28439032958e) else npString(R.string.np_60fe1ae1f6a6),
                     color = if (completed) Red else Muted, fontSize = 10.sp,
                     fontFamily = FontFamily.Default)
                 Spacer(Modifier.height(18.dp))
                 Surface(color = Panel2, shape = RoundedCornerShape(22.dp), modifier = Modifier.fillMaxWidth()) {
                     Column(Modifier.padding(18.dp), horizontalAlignment = Alignment.CenterHorizontally) {
                         DisplayTitle("${result.optInt("rounds")}", ndot, fontSize = 54.sp)
-                        Text("VOLLSTÄNDIGE RUNDEN", color = Muted, fontSize = 10.sp,
+                        Text(npString(R.string.np_69830ab7e0a9), color = Muted, fontSize = 10.sp,
                             fontFamily = FontFamily.Default)
                         if (result.optInt("extraExercises") > 0) {
-                            Text("+ ${result.optInt("extraExercises")} Übungen der nächsten Runde", color = White,
+                            Text(npString(R.string.np_aa7a64a2aec3 , result.optInt("extraExercises")), color = White,
                                 fontSize = 13.sp, modifier = Modifier.padding(top = 8.dp))
                         }
                     }
@@ -3817,18 +3858,18 @@ private fun AmrapSummaryDialog(result: JSONObject, ndot: FontFamily, onDelete: (
                 Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(10.dp)) {
                     Surface(Modifier.weight(1f), color = Panel2, shape = RoundedCornerShape(18.dp)) {
                         Column(Modifier.padding(13.dp)) {
-                            DisplayTitle("$totalReps", ndot, fontSize = 28.sp)
-                            Text("WIEDERHOLUNGEN", color = Muted, fontSize = 9.sp)
+                            DisplayTitle("${totalReps}", ndot, fontSize = 28.sp)
+                            Text(npString(R.string.np_acece0d2784d), color = Muted, fontSize = 9.sp)
                         }
                     }
                     Surface(Modifier.weight(1f), color = Panel2, shape = RoundedCornerShape(18.dp)) {
                         Column(Modifier.padding(13.dp)) {
-                            DisplayTitle("%02d:%02d".format(Locale.GERMAN, elapsedSeconds / 60, elapsedSeconds % 60), ndot, fontSize = 28.sp)
-                            Text("TRAININGSZEIT", color = Muted, fontSize = 9.sp)
+                            DisplayTitle("%02d:%02d".format(npLocale(), elapsedSeconds / 60, elapsedSeconds % 60), ndot, fontSize = 28.sp)
+                            Text(npString(R.string.np_2b0153ecca3c), color = Muted, fontSize = 9.sp)
                         }
                     }
                 }
-                SectionLabel("ÜBUNGEN", topPadding = 18.dp, bottomPadding = 9.dp)
+                SectionLabel(npString(R.string.np_a001ef56f69c), topPadding = 18.dp, bottomPadding = 9.dp)
                 for (i in 0 until items.length()) {
                     val item = items.optJSONObject(i) ?: continue
                     Row(Modifier.fillMaxWidth().padding(vertical = 9.dp), verticalAlignment = Alignment.CenterVertically) {
@@ -3838,17 +3879,17 @@ private fun AmrapSummaryDialog(result: JSONObject, ndot: FontFamily, onDelete: (
                         Spacer(Modifier.width(12.dp))
                         Column(Modifier.weight(1f)) {
                             Text(item.optString("name"), color = White, fontSize = 14.sp)
-                            Text("${item.optInt("target")} pro Runde", color = Muted, fontSize = 10.sp)
+                            Text(npString(R.string.np_bd5f97b68e6d , item.optInt("target")), color = Muted, fontSize = 10.sp)
                         }
                         Text("${item.optInt("totalReps")}", color = White, fontSize = 17.sp,
                             fontFamily = FontFamily.Default)
                     }
-                    if (i < items.length() - 1) HorizontalDivider(color = Color(0xFF303030))
+                    if (i < items.length() - 1) HorizontalDivider(color = npNeutral(0xFF303030))
                 }
                 Spacer(Modifier.height(14.dp))
                 Button(onClick = onClose, modifier = Modifier.fillMaxWidth().height(48.dp),
                     colors = ButtonDefaults.buttonColors(containerColor = White, contentColor = Bg),
-                    shape = RoundedCornerShape(16.dp)) { Text("FERTIG") }
+                    shape = RoundedCornerShape(16.dp)) { Text(npString(R.string.np_5b769ca72f3c)) }
             }
         }
     }
@@ -3923,7 +3964,7 @@ private fun AmrapLiveDialog(
             prefs.getString(prefix + "runId", null) ?: UUID.randomUUID().toString()
         else UUID.randomUUID().toString()
     }
-    var result by remember { mutableStateOf<JSONObject?>(resultPrefs.getString("amrap_session:$runId", null)?.let { runCatching { JSONObject(it) }.getOrNull() }) }
+    var result by remember { mutableStateOf<JSONObject?>(resultPrefs.getString("amrap_session:${runId}", null)?.let { runCatching { JSONObject(it) }.getOrNull() }) }
     val left = if (running) (endAt - now).coerceAtLeast(0L) else remaining
     fun save() {
         prefs.edit().putString(prefix + "runId", runId).putInt(prefix + "index", index).putInt(prefix + "rounds", rounds)
@@ -3951,7 +3992,7 @@ private fun AmrapLiveDialog(
             .put("elapsedMs", durationMs - remaining).put("rounds", rounds).put("extraExercises", index)
             .put("score", rounds * exercises.size + index).put("completed", completed)
             .put("signature", signature).put("items", items)
-        resultPrefs.edit().putString("amrap_session:$runId", obj.toString()).apply()
+        resultPrefs.edit().putString("amrap_session:${runId}", obj.toString()).apply()
         result = obj
         save()
     }
@@ -3982,17 +4023,17 @@ private fun AmrapLiveDialog(
     Dialog(onDismissRequest = onDismiss, properties = DialogProperties(usePlatformDefaultWidth = false)) {
         Surface(Modifier.fillMaxWidth().padding(16.dp), color = Panel, shape = RoundedCornerShape(28.dp)) {
             Column(Modifier.padding(20.dp), horizontalAlignment = Alignment.CenterHorizontally) {
-                Text("AMRAP · LIVE", color = Red, fontSize = 11.sp)
+                Text(npString(R.string.np_90d2782a0b9e), color = Red, fontSize = 11.sp)
                 DisplayTitle(workout.name, ndot, fontSize = 25.sp)
                 Spacer(Modifier.height(14.dp))
                 StableWorkoutTimer(left, ndot)
-                Text(if (running) "LÄUFT" else "PAUSIERT / BEREIT", color = Muted, fontSize = 11.sp)
-                Text("$rounds vollständige Runden", color = White, fontSize = 16.sp)
+                Text(if (running) npString(R.string.np_f7a984b986e2) else npString(R.string.np_99946c19db88), color = Muted, fontSize = 11.sp)
+                Text(npString(R.string.np_aac71de4cd34 , rounds), color = White, fontSize = 16.sp)
                 Spacer(Modifier.height(16.dp))
                 val ex = exercises.getOrNull(index)
                 if (ex != null) {
-                    DisplayTitle(ex.name.uppercase(Locale.GERMAN), ndot, fontSize = 25.sp)
-                    Text("${workout.amrapTargets[ex.id] ?: ex.targetReps.coerceAtLeast(1)} Wiederholungen", color = White)
+                    DisplayTitle(ex.name.uppercase(npLocale()), ndot, fontSize = 25.sp)
+                    Text(npString(R.string.np_a31fbb1a8dfd , workout.amrapTargets[ex.id] ?: ex.targetReps.coerceAtLeast(1)), color = White)
                 }
                 Button(onClick = {
                     if (!running) togglePause()
@@ -4004,13 +4045,13 @@ private fun AmrapLiveDialog(
                 }, enabled = exercises.isNotEmpty() && !finished,
                     modifier = Modifier.fillMaxWidth().padding(top = 18.dp).height(52.dp),
                     colors = ButtonDefaults.buttonColors(containerColor = White, contentColor = Bg)) {
-                    Text(if (running) "ÜBUNG ERLEDIGT ✓" else if (remaining == durationMs) "STARTEN" else "FORTSETZEN")
+                    Text(if (running) npString(R.string.np_1e12875abff8) else if (remaining == durationMs) npString(R.string.np_e7e229c1b0d1) else npString(R.string.np_d2ae184f0aa5))
                 }
                 Box(Modifier.fillMaxWidth().padding(top = 10.dp), contentAlignment = Alignment.Center) {
                     Surface(
                         modifier = Modifier.size(56.dp).clip(CircleShape).clickable(
                             enabled = !finished && (running || remaining < durationMs),
-                            onClickLabel = if (running) "Training pausieren" else "Training fortsetzen"
+                            onClickLabel = if (running) npString(R.string.np_e33efa2b3499) else npString(R.string.np_dc1478111cc6)
                         ) { togglePause() },
                         color = Panel2, shape = CircleShape
                     ) {
@@ -4037,8 +4078,8 @@ private fun AmrapLiveDialog(
                     }
                 }
                 Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
-                    TextButton(onClick = onDismiss) { Text("Minimieren", color = Muted) }
-                    TextButton(onClick = { finish(running && System.currentTimeMillis() >= endAt) }) { Text("Beenden", color = Red) }
+                    TextButton(onClick = onDismiss) { Text(npString(R.string.np_209bcbdc731e), color = Muted) }
+                    TextButton(onClick = { finish(running && System.currentTimeMillis() >= endAt) }) { Text(npString(R.string.np_ce9e650ed816), color = Red) }
                 }
             }
         }
@@ -4095,11 +4136,11 @@ private fun workoutSessionSnapshot(
 private data class WorkoutSetGroup(val label: String, val count: Int)
 
 private fun workoutSetLabel(set: JSONObject, kind: ExerciseKind): String = when (kind) {
-    ExerciseKind.WEIGHT -> "${java.math.BigDecimal.valueOf(set.optDouble("weightKg")).stripTrailingZeros().toPlainString().replace('.', ',')} kg × ${set.optInt("reps")} Wdh."
-    ExerciseKind.BODYWEIGHT -> "${set.optInt("reps")} Wdh."
-    ExerciseKind.CARDIO -> "%02d:%02d".format(Locale.GERMAN, set.optInt("seconds") / 60, set.optInt("seconds") % 60) +
-        if (set.optDouble("distanceKm") > 0) " · ${set.optDouble("distanceKm")} km" else ""
-    ExerciseKind.TIMED, ExerciseKind.AMRAP -> "${set.optInt("seconds")} Sek."
+    ExerciseKind.WEIGHT -> npString(R.string.np_e88f262429f9 , java.math.BigDecimal.valueOf(set.optDouble("weightKg")).stripTrailingZeros().toPlainString().replace('.', ','), set.optInt("reps"))
+    ExerciseKind.BODYWEIGHT -> npString(R.string.np_6a8982ba88d0 , set.optInt("reps"))
+    ExerciseKind.CARDIO -> npString(R.string.np_ce23a78c5616).format(npLocale(), set.optInt("seconds") / 60, set.optInt("seconds") % 60) +
+        if (set.optDouble("distanceKm") > 0) npString(R.string.np_a9f2c6673cc5 , set.optDouble("distanceKm")) else ""
+    ExerciseKind.TIMED, ExerciseKind.AMRAP -> npString(R.string.np_7f854c57c3cb , set.optInt("seconds"))
 }
 
 private fun groupedWorkoutSets(sets: JSONArray, kind: ExerciseKind): List<WorkoutSetGroup> {
@@ -4125,9 +4166,9 @@ private fun WorkoutSessionSummary(
         Surface(Modifier.fillMaxWidth().padding(16.dp).height(height), color = Panel, shape = RoundedCornerShape(28.dp)) {
             Column(Modifier.padding(18.dp)) {
                 Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
-                    Text("TRAINING GESPEICHERT", color = Red, fontSize = 10.sp, modifier = Modifier.weight(1f))
+                    Text(npString(R.string.np_47dfd446bfe8), color = Red, fontSize = 10.sp, modifier = Modifier.weight(1f))
                     if (onDelete != null) IconButton(onClick = onDelete,
-                        modifier = Modifier.semantics { contentDescription = "Vergangenes Workout löschen" }) {
+                        modifier = Modifier.semantics { contentDescription = npString(R.string.np_e0ad4c95450e) }) {
                         WorkoutActionIcon(WorkoutAction.DELETE, Red)
                     }
                 }
@@ -4137,29 +4178,29 @@ private fun WorkoutSessionSummary(
                     Surface(Modifier.weight(1f), color = Panel2, shape = RoundedCornerShape(16.dp)) {
                         Column(Modifier.padding(12.dp)) {
                             DisplayTitle("${result.optInt("setCount")}", ndot, fontSize = 28.sp)
-                            Text("SÄTZE GESAMT", color = Muted, fontSize = 9.sp)
+                            Text(npString(R.string.np_dadafe9ea717), color = Muted, fontSize = 9.sp)
                         }
                     }
                     Surface(Modifier.weight(1f), color = Panel2, shape = RoundedCornerShape(16.dp)) {
                         Column(Modifier.padding(12.dp)) {
                             DisplayTitle("${items.length()}", ndot, fontSize = 28.sp)
-                            Text("ÜBUNGEN", color = Muted, fontSize = 9.sp)
+                            Text(npString(R.string.np_a001ef56f69c), color = Muted, fontSize = 9.sp)
                         }
                     }
                     Surface(Modifier.weight(1f), color = Panel2, shape = RoundedCornerShape(16.dp)) {
                         Column(Modifier.padding(12.dp)) {
-                            Text(if (result.optBoolean("legacy")) "–" else "%02d:%02d".format(Locale.GERMAN, elapsed / 60, elapsed % 60),
+                            Text(if (result.optBoolean("legacy")) "–" else "%02d:%02d".format(npLocale(), elapsed / 60, elapsed % 60),
                                 color = White, fontSize = 21.sp)
-                            Text("DAUER", color = Muted, fontSize = 9.sp)
+                            Text(npString(R.string.np_d70301ab9f7e), color = Muted, fontSize = 9.sp)
                         }
                     }
                 }
-                if (result.optBoolean("legacy")) Text("${result.optString("legacyDate")} · Ältere Tagesaufzeichnung ohne genaue Sitzungsdauer.",
+                if (result.optBoolean("legacy")) Text(npString(R.string.np_5b96f6c45c8b , result.optString("legacyDate")),
                     color = Muted, fontSize = 10.sp, modifier = Modifier.padding(top = 8.dp))
                 Spacer(Modifier.height(12.dp))
                 Column(Modifier.weight(1f).fillMaxWidth().verticalScroll(rememberScrollState()),
                     verticalArrangement = Arrangement.spacedBy(10.dp)) {
-                    if (items.length() == 0) Text("Keine Sätze erfasst.", color = Muted, fontSize = 13.sp)
+                    if (items.length() == 0) Text(npString(R.string.np_afbb7532e92a), color = Muted, fontSize = 13.sp)
                     for (i in 0 until items.length()) {
                         val item = items.getJSONObject(i)
                         val sets = item.optJSONArray("sets") ?: JSONArray()
@@ -4171,22 +4212,22 @@ private fun WorkoutSessionSummary(
                             Surface(color = Panel2, shape = RoundedCornerShape(20.dp), modifier = Modifier.fillMaxWidth()) {
                                 Column(Modifier.padding(14.dp)) {
                                     Text(item.optString("name"), color = White, fontSize = 16.sp)
-                                    Text("${sets.length()} ${if (sets.length() == 1) "Satz" else "Sätze"}" +
-                                        if (kind in listOf(ExerciseKind.WEIGHT, ExerciseKind.BODYWEIGHT)) " · $reps Wiederholungen gesamt" else "",
+                                    Text("${sets.length()} ${if (sets.length() == 1) npString(R.string.np_2998fd7d2d10) else npString(R.string.np_60d312b24709)}" +
+                                        if (kind in listOf(ExerciseKind.WEIGHT, ExerciseKind.BODYWEIGHT)) npString(R.string.np_2ee87a811816 , reps) else "",
                                         color = Muted, fontSize = 11.sp)
                                     Spacer(Modifier.height(8.dp))
                                     groups.forEach { group ->
                                         Row(Modifier.fillMaxWidth().padding(vertical = 4.dp), verticalAlignment = Alignment.CenterVertically) {
-                                            Text("${group.count} ${if (group.count == 1) "Satz" else "Sätze"}", color = Red,
+                                            Text("${group.count} ${if (group.count == 1) npString(R.string.np_2998fd7d2d10) else npString(R.string.np_60d312b24709)}", color = Red,
                                                 fontSize = 12.sp, modifier = Modifier.width(64.dp))
                                             Text(group.label, color = White, fontSize = 14.sp, modifier = Modifier.weight(1f))
                                         }
                                     }
                                     TextButton(onClick = { showIndividual = !showIndividual }, contentPadding = PaddingValues(0.dp)) {
-                                        Text(if (showIndividual) "Einzelsätze ausblenden ⌃" else "Einzelsätze anzeigen ⌄", color = Muted, fontSize = 11.sp)
+                                        Text(if (showIndividual) npString(R.string.np_f8777d668985) else npString(R.string.np_ffb4fb4a1c5c), color = Muted, fontSize = 11.sp)
                                     }
                                     if (showIndividual) {
-                                        HorizontalDivider(color = Color(0xFF353535))
+                                        HorizontalDivider(color = npNeutral(0xFF353535))
                                         for (j in 0 until sets.length()) {
                                             val set = sets.optJSONObject(j) ?: continue
                                             Row(Modifier.fillMaxWidth().padding(vertical = 6.dp)) {
@@ -4203,7 +4244,7 @@ private fun WorkoutSessionSummary(
                 Spacer(Modifier.height(12.dp))
                 Button(onClick = onClose, modifier = Modifier.fillMaxWidth().height(48.dp),
                     shape = RoundedCornerShape(16.dp), colors = ButtonDefaults.buttonColors(containerColor = White, contentColor = Bg)) {
-                    Text("FERTIG")
+                    Text(npString(R.string.np_5b769ca72f3c))
                 }
             }
         }
@@ -4219,9 +4260,9 @@ private fun QuickWorkoutSet(exercise: Exercise, workout: Workout, today: String,
     Row(Modifier.fillMaxWidth().padding(bottom = 8.dp), horizontalArrangement = Arrangement.spacedBy(8.dp),
         verticalAlignment = Alignment.CenterVertically) {
         if (exercise.kind == ExerciseKind.WEIGHT) OutlinedTextField(weight, { weight = it.take(6) },
-            label = { Text("kg") }, singleLine = true, modifier = Modifier.weight(1f),
+            label = { Text(npString(R.string.np_1389845b02c0)) }, singleLine = true, modifier = Modifier.weight(1f),
             keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Decimal))
-        OutlinedTextField(reps, { reps = it.filter(Char::isDigit).take(3) }, label = { Text("Wdh.") },
+        OutlinedTextField(reps, { reps = it.filter(Char::isDigit).take(3) }, label = { Text(npString(R.string.np_8752f1c63e6e)) },
             singleLine = true, modifier = Modifier.weight(1f), keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number))
         val kg = weight.replace(',', '.').toFloatOrNull()
         val repetitions = reps.toIntOrNull()
@@ -4233,7 +4274,7 @@ private fun QuickWorkoutSet(exercise: Exercise, workout: Workout, today: String,
             (exercise.kind != ExerciseKind.WEIGHT || (kg != null && kg.isFinite() && kg in 0f..500f)),
             shape = RoundedCornerShape(14.dp), contentPadding = PaddingValues(horizontal = 12.dp),
             colors = ButtonDefaults.buttonColors(containerColor = White, contentColor = Bg),
-            modifier = Modifier.height(54.dp)) { Text("+ SATZ", fontSize = 11.sp) }
+            modifier = Modifier.height(54.dp)) { Text(npString(R.string.np_25d53566c51a), fontSize = 11.sp) }
     }
 }
 
@@ -4370,10 +4411,10 @@ private fun WorkoutExerciseStack(
                             Spacer(Modifier.width(10.dp))
                             Column(Modifier.weight(1f)) {
                                 Text(ex.name, color = White, fontSize = 15.sp, lineHeight = 19.sp)
-                                Text(if (isActive) "${ownLogs.size} Sätze in dieser Einheit" else "${index + 1}. Übung · ${exerciseKindLabel(ex.kind)}",
+                                Text(if (isActive) npString(R.string.np_1221f3fe1563 , ownLogs.size) else npString(R.string.np_eb94cc90f3be , index + 1, exerciseKindLabel(ex.kind)),
                                     color = if (ownLogs.isNotEmpty()) Red else Muted, fontSize = 10.sp)
                             }
-                            IconButton(onClick = { latestSelect(ex) }, modifier = Modifier.semantics { contentDescription = "Übungsinformationen" }) { WorkoutInfoIcon() }
+                            IconButton(onClick = { latestSelect(ex) }, modifier = Modifier.semantics { contentDescription = npString(R.string.np_e643fc8f64d5) }) { WorkoutInfoIcon() }
                             val arrowRotation by animateFloatAsState(if (expanded) 180f else 0f,
                                 animationSpec = tween(160), label = "exerciseChevron")
                             Canvas(Modifier.size(20.dp).graphicsLayer { rotationZ = arrowRotation }) {
@@ -4391,14 +4432,14 @@ private fun WorkoutExerciseStack(
                                     QuickWorkoutSet(ex, workout, today, lastLog, onQuickLog)
                                     ownLogs.forEachIndexed { setIndex, log ->
                                         Row(Modifier.fillMaxWidth().padding(vertical = 5.dp)) {
-                                            Text("Satz ${setIndex + 1}", color = Muted, fontSize = 11.sp, modifier = Modifier.weight(1f))
+                                            Text(npString(R.string.np_67c4677dcedc , setIndex + 1), color = Muted, fontSize = 11.sp, modifier = Modifier.weight(1f))
                                             Text(logSummary(ex, log), color = White, fontSize = 12.sp)
                                         }
                                     }
                                 } else Text(exerciseSummary(ex), color = Muted, fontSize = 12.sp)
                                 if (isActive && ex.kind !in listOf(ExerciseKind.WEIGHT, ExerciseKind.BODYWEIGHT)) {
                                     TextButton(onClick = { latestSelect(ex) }, contentPadding = PaddingValues(0.dp)) {
-                                        Text("Werte eintragen", color = White, fontSize = 12.sp)
+                                        Text(npString(R.string.np_2d007b4e073f), color = White, fontSize = 12.sp)
                                     }
                                 }
                             }
@@ -4445,31 +4486,31 @@ private fun WorkoutSheetDialog(
                 Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
                     Box(Modifier.size(7.dp).background(if (isActive) Red else Muted, CircleShape))
                     Spacer(Modifier.width(8.dp))
-                    Text(if (isActive) "TRAINING LÄUFT" else "VORBEREITUNG", color = if (isActive) Red else Muted,
+                    Text(if (isActive) npString(R.string.np_3d6849f8dec5) else npString(R.string.np_115e71776c64), color = if (isActive) Red else Muted,
                         fontFamily = FontFamily.Default, fontSize = 10.sp, letterSpacing = 1.3.sp,
                         modifier = Modifier.weight(1f))
-                    IconButton(onClick = onSaveTemplate, modifier = Modifier.semantics { contentDescription = "Als Vorlage speichern" }) { WorkoutTemplateIcon() }
-                    IconButton(onClick = onEditWorkout, modifier = Modifier.semantics { contentDescription = "Workout bearbeiten" }) { WorkoutActionIcon(WorkoutAction.EDIT) }
-                    IconButton(onClick = { confirmDelete = true }, modifier = Modifier.semantics { contentDescription = "Workout löschen" }) { WorkoutActionIcon(WorkoutAction.DELETE, Red) }
+                    IconButton(onClick = onSaveTemplate, modifier = Modifier.semantics { contentDescription = npString(R.string.np_7295825fe629) }) { WorkoutTemplateIcon() }
+                    IconButton(onClick = onEditWorkout, modifier = Modifier.semantics { contentDescription = npString(R.string.np_6c4a58f36192) }) { WorkoutActionIcon(WorkoutAction.EDIT) }
+                    IconButton(onClick = { confirmDelete = true }, modifier = Modifier.semantics { contentDescription = npString(R.string.np_081c6a21268a) }) { WorkoutActionIcon(WorkoutAction.DELETE, Red) }
                 }
                 DisplayTitle(workout.name, ndot, fontSize = 25.sp)
-                Text(if (isActive) "${exercises.size} Übungen · ${currentSets.size} Sätze in dieser Einheit" else "${exercises.size} Übungen · Bereite deine Reihenfolge vor",
+                Text(if (isActive) npString(R.string.np_912b94c66246 , exercises.size, currentSets.size) else npString(R.string.np_40119a2c9c19 , exercises.size),
                     color = Muted, fontSize = 12.sp)
                 if (isActive && startedAt > 0L) {
-                    Text("Gestartet um " + java.text.SimpleDateFormat("HH:mm", Locale.GERMAN).format(java.util.Date(startedAt)),
+                    Text(npString(R.string.np_bc6f103c2f20) + java.text.SimpleDateFormat("HH:mm", npLocale()).format(java.util.Date(startedAt)),
                         color = Muted, fontSize = 10.sp)
                 }
                 Spacer(Modifier.height(12.dp))
                 Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                     Surface(color = Panel2, shape = RoundedCornerShape(14.dp),
                         modifier = Modifier.weight(1f).clickable(onClick = onAddExistingExercise)) {
-                        Text("+ Übung hinzufügen", color = White, fontSize = 12.sp, modifier = Modifier.padding(13.dp))
+                        Text(npString(R.string.np_afafcf8171c4), color = White, fontSize = 12.sp, modifier = Modifier.padding(13.dp))
                     }
                     Surface(color = Panel2, shape = RoundedCornerShape(14.dp), modifier = Modifier.clickable(onClick = onAddNewExercise)) {
-                        Text("+ Neu", color = White, fontSize = 12.sp, modifier = Modifier.padding(13.dp))
+                        Text(npString(R.string.np_694aa76eb977), color = White, fontSize = 12.sp, modifier = Modifier.padding(13.dp))
                     }
                 }
-                Text("Antippen zum Aufklappen · Gedrückt halten und ziehen zum Sortieren",
+                Text(npString(R.string.np_339a27327c34),
                     color = Muted, fontSize = 10.sp, modifier = Modifier.padding(top = 9.dp, bottom = 10.dp))
                 Column(
                     Modifier.weight(1f).fillMaxWidth()
@@ -4483,7 +4524,7 @@ private fun WorkoutSheetDialog(
                         modifier = Modifier.padding(bottom = 4.dp))
                     if (exercises.isEmpty()) {
                         Surface(color = Panel, shape = RoundedCornerShape(18.dp), modifier = Modifier.fillMaxWidth()) {
-                            Text("Füge deine erste Übung hinzu. Die Reihenfolge kannst du jederzeit durch Ziehen ändern.",
+                            Text(npString(R.string.np_71482b1a8014),
                                 color = Muted, fontSize = 13.sp, modifier = Modifier.padding(18.dp))
                         }
                     } else WorkoutExerciseStack(workout, exercises, logs, todayStr, isActive, sessionId, scroll,
@@ -4496,26 +4537,26 @@ private fun WorkoutSheetDialog(
                     shape = RoundedCornerShape(16.dp),
                     colors = ButtonDefaults.buttonColors(containerColor = if (isActive) Panel2 else White,
                         contentColor = if (isActive) White else Bg)) {
-                    Text(if (isActive) "TRAINING BEENDEN" else "TRAINING STARTEN")
+                    Text(if (isActive) npString(R.string.np_c843c5c939d0) else npString(R.string.np_bca3386909f2))
                 }
                 TextButton(onClick = onDismiss, modifier = Modifier.align(Alignment.CenterHorizontally)) {
-                    Text(if (isActive) "Minimieren" else "Schließen", color = Muted)
+                    Text(if (isActive) npString(R.string.np_209bcbdc731e) else npString(R.string.np_44424b18700e), color = Muted)
                 }
             }
         }
     }
     if (confirmDelete) AlertDialog(
         onDismissRequest = { confirmDelete = false }, containerColor = Panel,
-        title = { DisplayTitle("WORKOUT LÖSCHEN?", ndot, fontSize = 24.sp) },
-        text = { Text("Das Workout wird entfernt. Gespeicherte Trainingssätze bleiben erhalten.", color = Muted) },
-        confirmButton = { TextButton(onClick = { confirmDelete = false; onDeleteWorkout() }) { Text("Löschen", color = Red) } },
-        dismissButton = { TextButton(onClick = { confirmDelete = false }) { Text("Abbrechen") } }
+        title = { DisplayTitle(npString(R.string.np_eec4b9363f9f), ndot, fontSize = 24.sp) },
+        text = { Text(npString(R.string.np_f6fd5dfdcbd9), color = Muted) },
+        confirmButton = { TextButton(onClick = { confirmDelete = false; onDeleteWorkout() }) { Text(npString(R.string.np_ffa5a8a7e21d), color = Red) } },
+        dismissButton = { TextButton(onClick = { confirmDelete = false }) { Text(npString(R.string.np_07af7cb30fca)) } }
     )
 }
 
 
 
-private fun savePersonalWorkoutTemplate(context: Context, workout: Workout, exercises: List<Exercise>) {
+private fun savePersonalWorkoutTemplate(context: Context, workout: Workout, exercises: List<Exercise>, templateKey: String? = null) {
     val chosen = workout.exerciseIds.mapNotNull { id -> exercises.find { it.id == id }?.let { ex ->
         ex.copy(targetReps = workout.amrapTargets[id] ?: ex.targetReps,
             targetWeightKg = workout.targetWeights[id] ?: ex.targetWeightKg)
@@ -4525,7 +4566,7 @@ private fun savePersonalWorkoutTemplate(context: Context, workout: Workout, exer
         .put("sourceIds", JSONArray(chosen.map { it.id }))
         .put("catalog", JSONObject(exportNpefJson(chosen)))
     context.getSharedPreferences("nplanner-v2", Context.MODE_PRIVATE).edit()
-        .putString("workout_template:" + UUID.randomUUID().toString(), obj.toString()).apply()
+        .putString(templateKey ?: ("workout_template:" + UUID.randomUUID().toString()), obj.toString()).apply()
 }
 
 private data class WorkoutPreset(
@@ -4572,101 +4613,99 @@ private val workoutPresets = listOf(
         "Ausdauertraining mit drei Cardio-Stationen.")
 )
 
+private fun seedEditableWorkoutTemplates(context: Context) {
+    val prefs = context.getSharedPreferences("nplanner-v2", Context.MODE_PRIVATE)
+    if (prefs.getBoolean("editable_template_catalog_v43", false)) return
+    workoutPresets.forEachIndexed { index, preset ->
+        val existing = prefs.all.filterKeys { it.startsWith("workout_template:") }.values.any { raw ->
+            runCatching { JSONObject(raw as String).optString("name").equals(preset.title, true) }.getOrDefault(false)
+        }
+        if (!existing) {
+            val reps = when (preset.title) {
+                "Cindy" -> mapOf("Klimmzüge" to 5, "Liegestütze" to 10, "Kniebeugen" to 15)
+                "Dev-AMRAP" -> mapOf("Liegestütze" to 3, "Kniebeugen" to 5, "Klimmzüge" to 2)
+                else -> emptyMap()
+            }
+            val selected = preset.exerciseNames.mapNotNull { name -> presetExercise(name)?.let { ex ->
+                ex.copy(targetReps = reps[name] ?: ex.targetReps)
+            } }
+            val workout = Workout("template-seed-${index}", preset.title, selected.map { it.id },
+                preset.description, preset.kind, preset.minutes * 60,
+                selected.associate { it.id to it.targetReps }, selected.associate { it.id to it.targetWeightKg })
+            savePersonalWorkoutTemplate(context, workout, selected, "workout_template:seed-v43-${index}")
+        }
+    }
+    prefs.edit().putBoolean("editable_template_catalog_v43", true).apply()
+}
+
 @Composable
 private fun WorkoutTemplateManager(
     ndot: FontFamily,
     templates: List<Pair<String, JSONObject>>,
     onDismiss: () -> Unit,
-    onStandard: (WorkoutPreset) -> Unit,
     onPersonal: (String) -> Unit,
-    onRename: (String, String) -> Unit,
+    onEdit: (String) -> Unit,
     onDelete: (String) -> Unit
 ) {
-    var editingKey by remember { mutableStateOf<String?>(null) }
-    var editedName by remember { mutableStateOf("") }
     var deleteKey by remember { mutableStateOf<String?>(null) }
     val height = androidx.compose.ui.platform.LocalConfiguration.current.screenHeightDp.dp * .85f
     Dialog(onDismissRequest = onDismiss, properties = DialogProperties(usePlatformDefaultWidth = false)) {
         Surface(Modifier.fillMaxWidth().padding(16.dp).height(height), color = Panel, shape = RoundedCornerShape(28.dp)) {
             Column(Modifier.padding(18.dp)) {
-                Text("WÄHLEN & VERWALTEN", color = Red, fontSize = 10.sp)
-                DisplayTitle("VORLAGEN", ndot, fontSize = 28.sp)
-                Spacer(Modifier.height(12.dp))
-                Text("EIGENE & STANDARDVORLAGEN", color = Muted, fontSize = 10.sp,
-                    modifier = Modifier.padding(top = 8.dp, bottom = 12.dp))
+                DisplayTitle(npString(R.string.np_7e022f02cec6), ndot, fontSize = 28.sp)
+                Text(npString(R.string.np_78c2350a7dac), color = Muted, fontSize = 12.sp)
+                Spacer(Modifier.height(14.dp))
                 Column(Modifier.weight(1f).fillMaxWidth().verticalScroll(rememberScrollState()),
                     verticalArrangement = Arrangement.spacedBy(10.dp)) {
-                    SectionLabel("MEINE VORLAGEN", topPadding = 4.dp, bottomPadding = 6.dp)
-                        if (templates.isEmpty()) {
-                            Surface(color = Panel2, shape = RoundedCornerShape(18.dp)) {
-                                Text("Noch keine eigenen Vorlagen. Speichere ein vorbereitetes Workout über das Lesezeichen-Symbol als Vorlage.",
-                                    color = Muted, fontSize = 13.sp, modifier = Modifier.padding(16.dp))
-                            }
-                        }
-                        templates.forEach { (key, obj) ->
-                            Surface(color = Panel2, shape = RoundedCornerShape(20.dp), modifier = Modifier.fillMaxWidth()) {
-                                Column(Modifier.padding(14.dp)) {
-                                    Text(obj.optString("name"), color = White, fontSize = 17.sp)
-                                    Text("${obj.optJSONArray("sourceIds")?.length() ?: 0} Übungen · ${obj.optString("kind").replace('_', ' ')}",
-                                        color = Muted, fontSize = 11.sp)
-                                    if (editingKey == key) {
-                                        Spacer(Modifier.height(8.dp))
-                                        OutlinedTextField(editedName, { editedName = it.take(48) }, label = { Text("Vorlagenname") },
-                                            singleLine = true, modifier = Modifier.fillMaxWidth())
-                                        Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.End) {
-                                            TextButton(onClick = { editingKey = null }) { Text("Abbrechen") }
-                                            TextButton(enabled = editedName.isNotBlank(), onClick = {
-                                                onRename(key, editedName.trim()); editingKey = null
-                                            }) { Text("Speichern", color = White) }
-                                        }
-                                    } else {
-                                        Spacer(Modifier.height(10.dp))
-                                        Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
-                                            Button(onClick = { onPersonal(key) }, modifier = Modifier.weight(1f),
-                                                shape = RoundedCornerShape(12.dp),
-                                                colors = ButtonDefaults.buttonColors(containerColor = White, contentColor = Bg)) {
-                                                Text("Verwenden", fontSize = 12.sp)
-                                            }
-                                            IconButton(onClick = { editingKey = key; editedName = obj.optString("name") },
-                                                modifier = Modifier.semantics { contentDescription = "Vorlage umbenennen" }) {
-                                                WorkoutActionIcon(WorkoutAction.EDIT)
-                                            }
-                                            IconButton(onClick = { deleteKey = key },
-                                                modifier = Modifier.semantics { contentDescription = "Vorlage löschen" }) {
-                                                WorkoutActionIcon(WorkoutAction.DELETE, Red)
-                                            }
-                                        }
+                    if (templates.isEmpty()) Text(npString(R.string.np_2a64c542f06d), color = Muted, fontSize = 13.sp)
+                    templates.forEach { (key, obj) ->
+                        Surface(color = Panel2, shape = RoundedCornerShape(20.dp), modifier = Modifier.fillMaxWidth()) {
+                            Column(Modifier.padding(14.dp)) {
+                                Text(obj.optString("name"), color = White, fontSize = 17.sp)
+                                val kind = runCatching { WorkoutKind.valueOf(obj.optString("kind")) }.getOrDefault(WorkoutKind.CLASSIC)
+                                Text(npString(R.string.np_57cd0aa977a8 , obj.optJSONArray("sourceIds")?.length() ?: 0, workoutKindLabel(kind)),
+                                    color = Muted, fontSize = 11.sp)
+                                Spacer(Modifier.height(10.dp))
+                                Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
+                                    Button(onClick = { onPersonal(key) }, modifier = Modifier.weight(1f),
+                                        shape = RoundedCornerShape(12.dp),
+                                        colors = ButtonDefaults.buttonColors(containerColor = White, contentColor = Bg)) {
+                                        Text(npString(R.string.np_8590499d2618), fontSize = 12.sp)
+                                    }
+                                    IconButton(onClick = { onEdit(key) },
+                                        modifier = Modifier.semantics { contentDescription = npString(R.string.np_bd648e366f1c) }) {
+                                        WorkoutActionIcon(WorkoutAction.EDIT)
+                                    }
+                                    IconButton(onClick = { deleteKey = key },
+                                        modifier = Modifier.semantics { contentDescription = npString(R.string.np_3541f89c389b) }) {
+                                        WorkoutActionIcon(WorkoutAction.DELETE, Red)
                                     }
                                 }
                             }
                         }
-                    SectionLabel("STANDARDVORLAGEN", topPadding = 16.dp, bottomPadding = 6.dp)
-                        workoutPresets.forEach { preset ->
-                            Surface(color = Panel2, shape = RoundedCornerShape(20.dp), modifier = Modifier.fillMaxWidth()) {
-                                Column(Modifier.padding(14.dp)) {
-                                    Text(preset.title, color = White, fontSize = 17.sp)
-                                    Text("${preset.exerciseNames.size} Übungen · ${preset.kind.name.replace('_', ' ')}" +
-                                        if (preset.minutes > 0) " · ${preset.minutes} Min." else "", color = Muted, fontSize = 11.sp)
-                                    Text(preset.exerciseNames.joinToString(" · "), color = Muted, fontSize = 11.sp,
-                                        modifier = Modifier.padding(top = 5.dp))
-                                    TextButton(onClick = { onStandard(preset) }, contentPadding = PaddingValues(0.dp)) {
-                                        Text("Vorlage verwenden →", color = White, fontSize = 12.sp)
-                                    }
-                                }
-                            }
-                        }
+                    }
                 }
-                TextButton(onClick = onDismiss, modifier = Modifier.align(Alignment.CenterHorizontally)) { Text("Schließen", color = White) }
+                Button(onClick = onDismiss, modifier = Modifier.fillMaxWidth().height(48.dp),
+                    shape = RoundedCornerShape(16.dp), colors = ButtonDefaults.buttonColors(containerColor = White, contentColor = Bg)) {
+                    Text(npString(R.string.np_5b769ca72f3c))
+                }
             }
         }
     }
     deleteKey?.let { key ->
         AlertDialog(onDismissRequest = { deleteKey = null }, containerColor = Panel,
-            title = { DisplayTitle("VORLAGE LÖSCHEN?", ndot, fontSize = 24.sp) },
-            text = { Text("Nur diese Vorlage wird entfernt. Workouts und Trainingsdaten bleiben erhalten.", color = Muted) },
-            confirmButton = { TextButton(onClick = { onDelete(key); deleteKey = null }) { Text("Vorlage löschen", color = Red) } },
-            dismissButton = { TextButton(onClick = { deleteKey = null }) { Text("Abbrechen") } })
+            title = { DisplayTitle(npString(R.string.np_0d704e60aba9), ndot, fontSize = 24.sp) },
+            text = { Text(npString(R.string.np_5d9a1728ae58), color = Muted) },
+            confirmButton = { TextButton(onClick = { onDelete(key); deleteKey = null }) { Text(npString(R.string.np_3541f89c389b), color = Red) } },
+            dismissButton = { TextButton(onClick = { deleteKey = null }) { Text(npString(R.string.np_07af7cb30fca)) } })
     }
+}
+
+private fun workoutKindLabel(kind: WorkoutKind): String = when (kind) {
+    WorkoutKind.CLASSIC -> npString(R.string.np_2cc58a112d0a)
+    WorkoutKind.AMRAP -> npString(R.string.np_3c22ccd4029f)
+    WorkoutKind.FOR_TIME -> npString(R.string.np_a8ed8ebb903d)
+    WorkoutKind.EMOM -> npString(R.string.np_05def8f48ffa)
 }
 
 @Composable
@@ -4688,8 +4727,8 @@ private fun WorkoutEditorDialog(
     title: String,
     initialName: String,
     initialNote: String,
-    initialPresetName: String? = null,
     initialPersonalKey: String? = null,
+    editingTemplate: Boolean = false,
     initialSelectedIds: Set<String>,
     initialKind: WorkoutKind,
     initialDurationSeconds: Int,
@@ -4725,7 +4764,7 @@ private fun WorkoutEditorDialog(
     var showPresetPicker by remember { mutableStateOf(false) }
     var showExercisePicker by remember { mutableStateOf(false) }
     var presetNotice by remember { mutableStateOf("") }
-    var selectedPresetName by remember { mutableStateOf(initialPresetName ?: if (initialPersonalKey != null) "Vorlage" else "") }
+    var selectedPresetName by remember { mutableStateOf(if (initialPersonalKey != null) "Vorlage" else "") }
     var selectedPresetTargets by remember { mutableStateOf(initialTargets) }
 
     fun choosePersonalTemplate(obj: JSONObject) {
@@ -4746,51 +4785,17 @@ private fun WorkoutEditorDialog(
                                         workoutKind = runCatching { WorkoutKind.valueOf(obj.optString("kind")) }.getOrDefault(WorkoutKind.CLASSIC)
                                         durationText = (obj.optInt("duration") / 60).coerceAtLeast(1).toString()
                                         name = obj.optString("name"); note = obj.optString("note")
+                                        showNote = note.isNotBlank()
                                         selectedPresetName = name
                                         nameManuallyEdited = true
-                                        presetNotice = "Eigene Vorlage geladen: ${resolved.size} Übungen."
+                                        presetNotice = npString(R.string.np_10d6959edc6c , resolved.size)
                                         showPresetPicker = false
     }
-    fun chooseStandardTemplate(preset: WorkoutPreset) {
-                                workoutKind = preset.kind
-                                selectedPresetName = preset.title
-                                durationText = (preset.minutes.takeIf { it > 0 } ?: 20).toString()
-                                name = preset.title
-                                nameManuallyEdited = true
-                                note = preset.description
-                                val existing = allExercises.associateBy { it.name.trim().lowercase(Locale.GERMAN) }
-                                val missing = preset.exerciseNames.mapNotNull { n ->
-                                    if (n.trim().lowercase(Locale.GERMAN) in existing) null
-                                    else presetExercise(n)?.copy(id = UUID.randomUUID().toString())
-                                }
-                                if (missing.isNotEmpty()) onAddPresetExercises(missing)
-                                val selected = preset.exerciseNames.mapNotNull { n ->
-                                    existing[n.trim().lowercase(Locale.GERMAN)]?.id
-                                        ?: missing.firstOrNull { it.name.equals(n, ignoreCase = true) }?.id
-                                }
-                                selectedIds = selected.toSet()
-                                selectedOrder = selected
-                                selectedWeights = emptyMap()
-                                pendingPresetExercises = missing
-                                val reps = when (preset.title) {
-                                    "Cindy" -> mapOf("Klimmzüge" to 5, "Liegestütze" to 10, "Kniebeugen" to 15)
-                                    "Dev-AMRAP" -> mapOf("Liegestütze" to 3, "Kniebeugen" to 5, "Klimmzüge" to 2)
-                                    else -> emptyMap()
-                                }
-                                selectedPresetTargets = preset.exerciseNames.mapNotNull { n ->
-                                    val id = existing[n.lowercase(Locale.GERMAN)]?.id
-                                        ?: missing.firstOrNull { it.name.equals(n, ignoreCase = true) }?.id
-                                    if (id != null && reps[n] != null) id to reps.getValue(n) else null
-                                }.toMap()
-                                presetNotice = "${selected.size}/${preset.exerciseNames.size} Übungen übernommen."
-                                showPresetPicker = false
-    }
-    LaunchedEffect(initialPresetName, initialPersonalKey) {
-        if (initialPresetName != null) {
-            workoutPresets.find { it.title == initialPresetName }?.let { chooseStandardTemplate(it) }
-        } else if (initialPersonalKey != null) {
+    LaunchedEffect(initialPersonalKey) {
+        if (initialPersonalKey != null) {
             personalPrefs.getString(initialPersonalKey, null)?.let { raw ->
                 runCatching { JSONObject(raw) }.getOrNull()?.let { choosePersonalTemplate(it) }
+                if (editingTemplate) selectedPresetName = ""
             }
         }
     }
@@ -4810,14 +4815,15 @@ private fun WorkoutEditorDialog(
             shape = RoundedCornerShape(28.dp)
         ) {
             Column(Modifier.verticalScroll(rememberScrollState()).padding(22.dp)) {
-                Text("WORKOUT PLANEN", color = Red, fontSize = 10.sp,
+                Text(npString(R.string.np_365b02b7539f), color = Red, fontSize = 10.sp,
                     fontFamily = FontFamily.Default, letterSpacing = 1.3.sp)
                 Spacer(Modifier.height(6.dp))
-                DisplayTitle(if (isNew) "NEUES WORKOUT" else "WORKOUT BEARBEITEN", ndot, fontSize = 26.sp)
-                Text("Vorlage wählen, Details prüfen und Training öffnen.", color = Muted, fontSize = 12.sp)
+                DisplayTitle(if (editingTemplate) npString(R.string.np_133ef6da2558) else if (isNew) npString(R.string.np_6d4ea26db3e6) else npString(R.string.np_b15d10e09c4f), ndot, fontSize = 26.sp)
+                Text(npString(R.string.np_1becf5c9569f), color = Muted, fontSize = 12.sp)
                 Spacer(Modifier.height(16.dp))
 
-                Text("01  VORLAGE", color = Muted, fontSize = 10.sp, fontFamily = FontFamily.Default)
+                if (!editingTemplate) {
+                Text(npString(R.string.np_7ddced18c41c), color = Muted, fontSize = 10.sp, fontFamily = FontFamily.Default)
                 Spacer(Modifier.height(8.dp))
                 Surface(
                     color = Panel2,
@@ -4825,38 +4831,39 @@ private fun WorkoutEditorDialog(
                     modifier = Modifier.fillMaxWidth().clickable { showPresetPicker = true }
                 ) {
                     Row(Modifier.padding(16.dp), verticalAlignment = Alignment.CenterVertically) {
-                        Text("WORKOUT-VORLAGE WÄHLEN", color = White, fontSize = 12.sp, modifier = Modifier.weight(1f))
+                        Text(npString(R.string.np_191afa7267a0), color = White, fontSize = 12.sp, modifier = Modifier.weight(1f))
                         Text("›", color = Muted)
                     }
                 }
                 Spacer(Modifier.height(8.dp))
+                }
                 if (selectedPresetName.isNotBlank()) {
                     Surface(color = Panel2, shape = RoundedCornerShape(18.dp), modifier = Modifier.fillMaxWidth()) {
                         Column(Modifier.padding(16.dp)) {
-                            Text("VORLAGE AUSGEWÄHLT", color = Red, fontSize = 10.sp, fontFamily = FontFamily.Default)
+                            Text(npString(R.string.np_5963b0f293cf), color = Red, fontSize = 10.sp, fontFamily = FontFamily.Default)
                             Spacer(Modifier.height(6.dp))
-                            DisplayTitle(name.uppercase(Locale.GERMAN), ndot, fontSize = 24.sp)
-                            Text("${selectedIds.size} Übungen · ${when (workoutKind) {
-                                WorkoutKind.CLASSIC -> "Klassisch"
-                                WorkoutKind.AMRAP -> "AMRAP"
-                                WorkoutKind.FOR_TIME -> "For Time"
-                                WorkoutKind.EMOM -> "EMOM"
-                            }}", color = Muted, fontSize = 12.sp)
+                            DisplayTitle(name.uppercase(npLocale()), ndot, fontSize = 24.sp)
+                            Text(npString(R.string.np_57cd0aa977a8 , selectedIds.size, when (workoutKind) {
+                                WorkoutKind.CLASSIC -> npString(R.string.np_2cc58a112d0a)
+                                WorkoutKind.AMRAP -> npString(R.string.np_3c22ccd4029f)
+                                WorkoutKind.FOR_TIME -> npString(R.string.np_a8ed8ebb903d)
+                                WorkoutKind.EMOM -> npString(R.string.np_05def8f48ffa)
+                            }), color = Muted, fontSize = 12.sp)
                             if (workoutKind != WorkoutKind.CLASSIC) {
                                 Spacer(Modifier.height(10.dp))
                                 OutlinedTextField(durationText, { durationText = it.filter(Char::isDigit).take(3) },
-                                    label = { Text("Dauer (Minuten)") },
+                                    label = { Text(npString(R.string.np_3e2b606422c8)) },
                                     singleLine = true,
                                     keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
                                     modifier = Modifier.fillMaxWidth())
                             }
                             TextButton(onClick = { selectedPresetName = ""; saveAsTemplate = false }) {
-                                Text("Vorlage individuell anpassen", color = White, fontSize = 12.sp)
+                                Text(npString(R.string.np_49892ed3adbb), color = White, fontSize = 12.sp)
                             }
                         }
                     }
                 } else {
-                Text("02  DETAILS", color = Muted, fontSize = 10.sp, fontFamily = FontFamily.Default,
+                Text(npString(R.string.np_17246eaa3c0c), color = Muted, fontSize = 10.sp, fontFamily = FontFamily.Default,
                     modifier = Modifier.padding(top = 8.dp, bottom = 8.dp))
                 OutlinedTextField(
                     value = name,
@@ -4864,44 +4871,44 @@ private fun WorkoutEditorDialog(
                         name = it.take(48)
                         nameManuallyEdited = true
                     },
-                    label = { Text("Workout-Name (Vorschlag anpassbar)") },
+                    label = { Text(npString(R.string.np_05bcabc4a9ba)) },
                     singleLine = true,
                     modifier = Modifier.fillMaxWidth()
                 )
                 Spacer(Modifier.height(8.dp))
                 if (!showNote) {
                     TextButton(onClick = { showNote = true }, contentPadding = PaddingValues(horizontal = 0.dp)) {
-                        Text("+ Notiz hinzufügen", color = Muted, fontSize = 12.sp)
+                        Text(npString(R.string.np_de51b771f43d), color = Muted, fontSize = 12.sp)
                     }
                 } else {
                     OutlinedTextField(
                         value = note,
                         onValueChange = { note = it.take(80) },
-                        label = { Text("Notiz / Fokus") },
+                        label = { Text(npString(R.string.np_af51affdaed8)) },
                         singleLine = true,
                         modifier = Modifier.fillMaxWidth()
                     )
                 }
 
-                SectionLabel("WORKOUT-ART", topPadding = 14.dp, bottomPadding = 8.dp)
+                SectionLabel(npString(R.string.np_893106ea23f8), topPadding = 14.dp, bottomPadding = 8.dp)
                 Row(Modifier.horizontalScroll(rememberScrollState()), horizontalArrangement = Arrangement.spacedBy(7.dp)) {
                     listOf(
-                        WorkoutKind.CLASSIC to "Klassisch",
-                        WorkoutKind.AMRAP to "AMRAP",
-                        WorkoutKind.FOR_TIME to "For Time",
-                        WorkoutKind.EMOM to "EMOM"
+                        WorkoutKind.CLASSIC to npString(R.string.np_2cc58a112d0a),
+                        WorkoutKind.AMRAP to npString(R.string.np_3c22ccd4029f),
+                        WorkoutKind.FOR_TIME to npString(R.string.np_a8ed8ebb903d),
+                        WorkoutKind.EMOM to npString(R.string.np_05def8f48ffa)
                     ).forEach { (kind, label) ->
                         ChoiceChip(label, workoutKind == kind, Modifier.width(108.dp)) { workoutKind = kind }
                     }
                 }
                 if (workoutKind != WorkoutKind.CLASSIC) {
                     OutlinedTextField(durationText, { durationText = it.filter(Char::isDigit).take(3) },
-                        label = { Text(if (workoutKind == WorkoutKind.FOR_TIME) "Zeitlimit (Minuten)" else "Dauer (Minuten)") },
+                        label = { Text(if (workoutKind == WorkoutKind.FOR_TIME) npString(R.string.np_6aed3e27e961) else npString(R.string.np_3e2b606422c8)) },
                         keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
                         modifier = Modifier.fillMaxWidth().padding(top = 8.dp))
                 }
                 Spacer(Modifier.height(10.dp))
-                Text("03  ÜBUNGEN", color = Muted, fontSize = 10.sp, fontFamily = FontFamily.Default,
+                Text(npString(R.string.np_bf7fe08cc83d), color = Muted, fontSize = 10.sp, fontFamily = FontFamily.Default,
                     modifier = Modifier.padding(top = 8.dp, bottom = 8.dp))
                 Surface(
                     color = Panel2,
@@ -4909,32 +4916,68 @@ private fun WorkoutEditorDialog(
                     modifier = Modifier.fillMaxWidth().clickable { showExercisePicker = true }
                 ) {
                     Row(Modifier.padding(16.dp), verticalAlignment = Alignment.CenterVertically) {
-                        Text("ÜBUNGEN AUSWÄHLEN", color = White, fontSize = 12.sp, modifier = Modifier.weight(1f))
+                        Text(npString(R.string.np_5fed967a4959), color = White, fontSize = 12.sp, modifier = Modifier.weight(1f))
                         Text("${selectedIds.size}  ›", color = Muted)
                     }
                 }
+                }
+                if (editingTemplate && selectedIds.isNotEmpty()) {
+                    Text(npString(R.string.np_31b7c5eb20fc), color = Muted, fontSize = 10.sp,
+                        modifier = Modifier.padding(top = 12.dp, bottom = 8.dp))
+                    selectedOrder.filter { it in selectedIds }.forEach { id ->
+                        val ex = (allExercises + pendingPresetExercises).firstOrNull { it.id == id }
+                        if (ex != null) key(id) {
+                            Surface(color = Panel2, shape = RoundedCornerShape(16.dp), modifier = Modifier.fillMaxWidth().padding(bottom = 8.dp)) {
+                                Column(Modifier.padding(12.dp)) {
+                                    Text(ex.name, color = White, fontSize = 14.sp)
+                                    Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                                        if (ex.kind == ExerciseKind.WEIGHT) {
+                                            var weightText by remember { mutableStateOf((selectedWeights[id] ?: ex.targetWeightKg).toString()) }
+                                            OutlinedTextField(weightText, { value ->
+                                                weightText = value.take(6)
+                                                value.replace(',', '.').toFloatOrNull()?.takeIf { it.isFinite() && it in 0f..500f }?.let {
+                                                    selectedWeights = selectedWeights + (id to it)
+                                                }
+                                            }, label = { Text(npString(R.string.np_237d426ca60f)) }, singleLine = true,
+                                                keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Decimal), modifier = Modifier.weight(1f))
+                                        }
+                                        if (ex.kind in listOf(ExerciseKind.WEIGHT, ExerciseKind.BODYWEIGHT) || workoutKind == WorkoutKind.AMRAP) {
+                                            var repsText by remember { mutableStateOf((selectedPresetTargets[id] ?: ex.targetReps).toString()) }
+                                            OutlinedTextField(repsText, { value ->
+                                                repsText = value.filter(Char::isDigit).take(3)
+                                                repsText.toIntOrNull()?.takeIf { it in 1..500 }?.let {
+                                                    selectedPresetTargets = selectedPresetTargets + (id to it)
+                                                }
+                                            }, label = { Text(npString(R.string.np_153aa01039aa)) }, singleLine = true,
+                                                keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number), modifier = Modifier.weight(1f))
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                    }
                 }
                 if (presetNotice.isNotBlank() && selectedPresetName.isBlank()) Text(presetNotice, color = Muted, fontSize = 11.sp,
                     modifier = Modifier.padding(top = 8.dp))
 
                 Spacer(Modifier.height(12.dp))
-                if (selectedPresetName.isBlank()) Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
+                if (!editingTemplate && selectedPresetName.isBlank()) Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
                     Column(Modifier.weight(1f)) {
-                        Text("Als eigene Vorlage speichern", color = White, fontSize = 13.sp)
-                        Text("Ohne Trainingsverlauf, separat wiederverwendbar.", color = Muted, fontSize = 10.sp)
+                        Text(npString(R.string.np_f711c4662ae4), color = White, fontSize = 13.sp)
+                        Text(npString(R.string.np_fba7bf471cf9), color = Muted, fontSize = 10.sp)
                     }
                     Switch(checked = saveAsTemplate, enabled = selectedIds.isNotEmpty(), onCheckedChange = { saveAsTemplate = it })
                 }
                 Text(if (selectedPresetName.isNotBlank())
-                    "Vorlage übernehmen und Workout vorbereiten. Das Training startet anschließend manuell."
+                    npString(R.string.np_7396ed26d384)
                     else if (isNew && workoutKind == WorkoutKind.AMRAP)
-                    "Workout vorbereiten. Der AMRAP-Countdown startet erst mit STARTEN."
-                    else if (isNew) "Das Workout wird angelegt und anschließend geöffnet."
-                    else "Änderungen werden gespeichert.",
+                    npString(R.string.np_2430d35abb61)
+                    else if (isNew) npString(R.string.np_df8af55eabbf)
+                    else npString(R.string.np_bf810ccd740c),
                     color = Muted, fontSize = 11.sp, lineHeight = 15.sp)
                 Spacer(Modifier.height(16.dp))
                 Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.End) {
-                    TextButton(onClick = onDismiss) { Text("Abbrechen") }
+                    TextButton(onClick = onDismiss) { Text(npString(R.string.np_07af7cb30fca)) }
                     TextButton(
                         onClick = {
                             val fallback = suggestWorkoutName(
@@ -4954,7 +4997,7 @@ private fun WorkoutEditorDialog(
                                 if (workoutKind == WorkoutKind.CLASSIC) 0 else (durationText.toIntOrNull() ?: 20).coerceIn(1, 480) * 60,
                                 selectedPresetTargets.filterKeys { it in selectedIds }, selectedWeights.filterKeys { it in selectedIds })
                         }
-                    ) { Text(if (!isNew) "SPEICHERN" else "WORKOUT ANLEGEN") }
+                    ) { Text(if (!isNew) npString(R.string.np_c05fabc0e5af) else npString(R.string.np_2484cd764a80)) }
                 }
             }
         }
@@ -4962,11 +5005,12 @@ private fun WorkoutEditorDialog(
     if (showPresetPicker) {
         AlertDialog(
             onDismissRequest = { showPresetPicker = false },
-            title = { Text("WORKOUT-VORLAGEN", color = White) },
+            title = { DisplayTitle(npString(R.string.np_7e022f02cec6), ndot, fontSize = 25.sp) },
             text = {
                 Column(Modifier.heightIn(max = 410.dp).verticalScroll(rememberScrollState()), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                    if (personalTemplates.isEmpty()) Text(npString(R.string.np_2a64c542f06d), color = Muted, fontSize = 12.sp)
                     if (personalTemplates.isNotEmpty()) {
-                        Text("MEINE VORLAGEN", color = Red, fontSize = 10.sp, fontFamily = FontFamily.Default)
+                        Text(npString(R.string.np_7e022f02cec6), color = Red, fontSize = 10.sp, fontFamily = FontFamily.Default)
                         personalTemplates.forEach { (templateKey, obj) ->
                             Surface(color = Panel2, shape = RoundedCornerShape(15.dp), modifier = Modifier.fillMaxWidth()) {
                                 Row(Modifier.padding(12.dp), verticalAlignment = Alignment.CenterVertically) {
@@ -4974,37 +5018,22 @@ private fun WorkoutEditorDialog(
                                         choosePersonalTemplate(obj)
                                     }) {
                                         Text(obj.optString("name"), color = White, fontSize = 15.sp)
-                                        Text("Eigene Vorlage", color = Muted, fontSize = 10.sp)
-                                    }
-                                    IconButton(onClick = { personalPrefs.edit().remove(templateKey).apply(); personalRevision++ }) {
-                                        WorkoutActionIcon(WorkoutAction.DELETE, Muted)
+                                        Text(npString(R.string.np_831b6a6e215c), color = Muted, fontSize = 10.sp)
                                     }
                                 }
                             }
                         }
                     }
-                    Text("STANDARDVORLAGEN", color = Muted, fontSize = 10.sp, fontFamily = FontFamily.Default)
-                    workoutPresets.forEach { preset ->
-                        Surface(color = Panel2, shape = RoundedCornerShape(15.dp),
-                            modifier = Modifier.fillMaxWidth().clickable {
-                                chooseStandardTemplate(preset)
-                            }) {
-                            Column(Modifier.padding(13.dp)) {
-                                Text(preset.title, color = White, fontSize = 15.sp)
-                                Text("${preset.kind.name} · ${preset.exerciseNames.joinToString(", ")}", color = Muted, fontSize = 10.sp)
-                            }
-                        }
-                    }
                 }
             },
-            confirmButton = { TextButton(onClick = { showPresetPicker = false }) { Text("Schließen") } },
+            confirmButton = { TextButton(onClick = { showPresetPicker = false }) { Text(npString(R.string.np_44424b18700e)) } },
             containerColor = Panel
         )
     }
     if (showExercisePicker) {
         AlertDialog(
             onDismissRequest = { showExercisePicker = false },
-            title = { DisplayTitle("ÜBUNGEN AUSWÄHLEN", ndot, fontSize = 24.sp) },
+            title = { DisplayTitle(npString(R.string.np_5fed967a4959), ndot, fontSize = 24.sp) },
             text = {
                 Column(Modifier.heightIn(max = 400.dp).verticalScroll(rememberScrollState()),
                     verticalArrangement = Arrangement.spacedBy(6.dp)) {
@@ -5023,7 +5052,7 @@ private fun WorkoutEditorDialog(
                     }
                 }
             },
-            confirmButton = { TextButton(onClick = { showExercisePicker = false }) { Text("Übernehmen") } },
+            confirmButton = { TextButton(onClick = { showExercisePicker = false }) { Text(npString(R.string.np_594308426372)) } },
             containerColor = Panel
         )
     }
@@ -5071,22 +5100,22 @@ private fun ExerciseDetailDialog(
         ) {
             Column(Modifier.verticalScroll(rememberScrollState()).padding(22.dp)) {
                 Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
-                    Text(exerciseKindLabel(exercise.kind).uppercase(Locale.GERMAN), color = Red,
+                    Text(exerciseKindLabel(exercise.kind).uppercase(npLocale()), color = Red,
                         fontFamily = FontFamily.Default, fontSize = 10.sp, modifier = Modifier.weight(1f))
                     Box {
                         IconButton(onClick = { showExerciseActions = true }) { Text("⋮", color = White, fontSize = 24.sp) }
                         DropdownMenu(expanded = showExerciseActions, onDismissRequest = { showExerciseActions = false }) {
-                            DropdownMenuItem(text = { Text("Übung teilen") }, onClick = { showExerciseActions = false; onShareExercise() })
-                            DropdownMenuItem(text = { Text("Als Datei exportieren") }, onClick = { showExerciseActions = false; onExportExercise() })
-                            if (onRemoveFromWorkout != null) DropdownMenuItem(text = { Text("Aus Workout entfernen") },
+                            DropdownMenuItem(text = { Text(npString(R.string.np_3e30e6838966)) }, onClick = { showExerciseActions = false; onShareExercise() })
+                            DropdownMenuItem(text = { Text(npString(R.string.np_f3434075835f)) }, onClick = { showExerciseActions = false; onExportExercise() })
+                            if (onRemoveFromWorkout != null) DropdownMenuItem(text = { Text(npString(R.string.np_4dfb6705cdd7)) },
                                 onClick = { showExerciseActions = false; onRemoveFromWorkout() })
                         }
                     }
                     IconButton(onClick = onEditExercise) { WorkoutActionIcon(WorkoutAction.EDIT) }
                     IconButton(onClick = { confirmExerciseDelete = true }) { WorkoutActionIcon(WorkoutAction.DELETE, Red) }
                 }
-                DisplayTitle(exercise.name.uppercase(Locale.GERMAN), ndot, fontSize = 26.sp)
-                Text(exercise.muscle + " · " + exerciseKindLabel(exercise.kind), color = Muted, fontSize = 12.sp)
+                DisplayTitle(exercise.name.uppercase(npLocale()), ndot, fontSize = 26.sp)
+                Text(npMuscleLabel(exercise.muscle) + " · " + exerciseKindLabel(exercise.kind), color = Muted, fontSize = 12.sp)
                 Spacer(Modifier.height(8.dp))
                 if (exercise.description.isNotBlank()) {
                     Spacer(Modifier.height(8.dp))
@@ -5102,7 +5131,7 @@ private fun ExerciseDetailDialog(
                 }
 
                 if (exercise.steps.isNotEmpty()) {
-                    SectionLabel("AUSFÜHRUNG", topPadding = 16.dp, bottomPadding = 8.dp)
+                    SectionLabel(npString(R.string.np_9e8be764359c), topPadding = 16.dp, bottomPadding = 8.dp)
                     Surface(color = Panel2, shape = RoundedCornerShape(18.dp), modifier = Modifier.fillMaxWidth()) {
                         Column(Modifier.padding(14.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
                             exercise.steps.forEachIndexed { i, step ->
@@ -5122,21 +5151,21 @@ private fun ExerciseDetailDialog(
                 }
 
                 if (canLog) {
-                SectionLabel("SATZ EINTRAGEN", topPadding = 18.dp, bottomPadding = 10.dp)
+                SectionLabel(npString(R.string.np_6e1b76036d3e), topPadding = 18.dp, bottomPadding = 10.dp)
                 when (exercise.kind) {
                     ExerciseKind.CARDIO, ExerciseKind.AMRAP -> {
                         Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                             OutlinedTextField(secondsText, { secondsText = it.filter(Char::isDigit).take(5) },
-                                label = { Text("Dauer (Sek.)") }, modifier = Modifier.weight(1f),
+                                label = { Text(npString(R.string.np_5b0e65c12ab8)) }, modifier = Modifier.weight(1f),
                                 keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number))
                             if (exercise.kind == ExerciseKind.CARDIO) {
                                 OutlinedTextField(distanceText, { distanceText = it.take(8) },
-                                    label = { Text("Distanz (km)") }, modifier = Modifier.weight(1f),
+                                    label = { Text(npString(R.string.np_8f9f75816344)) }, modifier = Modifier.weight(1f),
                                     keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Decimal))
                             }
                             if (exercise.kind == ExerciseKind.AMRAP) {
                                 OutlinedTextField(repsText, { repsText = it.filter(Char::isDigit).take(4) },
-                                    label = { Text("Runden") }, modifier = Modifier.weight(1f),
+                                    label = { Text(npString(R.string.np_c042750d784a)) }, modifier = Modifier.weight(1f),
                                     keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number))
                             }
                         }
@@ -5147,7 +5176,7 @@ private fun ExerciseDetailDialog(
                             OutlinedTextField(
                                 value = weightText,
                                 onValueChange = { weightText = it.take(6) },
-                                label = { Text("Gewicht (kg)") },
+                                label = { Text(npString(R.string.np_237d426ca60f)) },
                                 singleLine = true,
                                 keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Decimal),
                                 modifier = Modifier.weight(1f)
@@ -5155,7 +5184,7 @@ private fun ExerciseDetailDialog(
                             OutlinedTextField(
                                 value = repsText,
                                 onValueChange = { repsText = it.filter(Char::isDigit).take(4) },
-                                label = { Text("Wdh.") },
+                                label = { Text(npString(R.string.np_8752f1c63e6e)) },
                                 singleLine = true,
                                 keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
                                 modifier = Modifier.weight(1f)
@@ -5166,7 +5195,7 @@ private fun ExerciseDetailDialog(
                         OutlinedTextField(
                             value = repsText,
                             onValueChange = { repsText = it.filter(Char::isDigit).take(4) },
-                            label = { Text("Wiederholungen (Körpergewicht)") },
+                            label = { Text(npString(R.string.np_c45203d53584)) },
                             singleLine = true,
                             keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
                             modifier = Modifier.fillMaxWidth()
@@ -5177,7 +5206,7 @@ private fun ExerciseDetailDialog(
                             OutlinedTextField(
                                 value = repsText,
                                 onValueChange = { repsText = it.filter(Char::isDigit).take(4) },
-                                label = { Text("Wdh. (1 = Halten)") },
+                                label = { Text(npString(R.string.np_733e0e2f101e)) },
                                 singleLine = true,
                                 keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
                                 modifier = Modifier.weight(1f)
@@ -5185,7 +5214,7 @@ private fun ExerciseDetailDialog(
                             OutlinedTextField(
                                 value = secondsText,
                                 onValueChange = { secondsText = it.filter(Char::isDigit).take(5) },
-                                label = { Text("Zeit (Sek.)") },
+                                label = { Text(npString(R.string.np_b7a874a0db72)) },
                                 singleLine = true,
                                 keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
                                 modifier = Modifier.weight(1f)
@@ -5220,7 +5249,7 @@ private fun ExerciseDetailDialog(
                 ) {
                     Box(contentAlignment = Alignment.Center) {
                         Text(
-                            "SATZ SPEICHERN",
+                            npString(R.string.np_40def82f84df),
                             color = Bg,
                             fontFamily = FontFamily.Default,
                             fontSize = 12.sp,
@@ -5232,12 +5261,12 @@ private fun ExerciseDetailDialog(
 
                 } else {
                     Surface(color = Panel2, shape = RoundedCornerShape(16.dp), modifier = Modifier.fillMaxWidth().padding(top = 14.dp)) {
-                        Text("Sätze werden ausschließlich in einem gestarteten Workout erfasst.", color = Muted,
+                        Text(npString(R.string.np_34921ec5cba3), color = Muted,
                             fontSize = 12.sp, modifier = Modifier.padding(14.dp))
                     }
                 }
                 if (logs.isNotEmpty()) {
-                    SectionLabel("VERLAUF (${logs.size} SÄTZE)", topPadding = 18.dp, bottomPadding = 8.dp)
+                    SectionLabel(npString(R.string.np_51c7037a75ce , logs.size), topPadding = 18.dp, bottomPadding = 8.dp)
                     Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
                         logs.takeLast(5).asReversed().forEach { log ->
                             Row(
@@ -5260,17 +5289,17 @@ private fun ExerciseDetailDialog(
                     TextButton(onClick = {
                         onHapticTick()
                         onDismiss()
-                    }) { Text("Schließen") }
+                    }) { Text(npString(R.string.np_44424b18700e)) }
                 }
             }
         }
     }
     if (confirmExerciseDelete) AlertDialog(
         onDismissRequest = { confirmExerciseDelete = false }, containerColor = Panel,
-        title = { DisplayTitle("ÜBUNG LÖSCHEN?", ndot, fontSize = 24.sp) },
-        text = { Text("Die Übung wird aus deiner Bibliothek entfernt. Möchtest du fortfahren?", color = Muted) },
-        confirmButton = { TextButton(onClick = { confirmExerciseDelete = false; onDeleteExercise() }) { Text("Löschen", color = Red) } },
-        dismissButton = { TextButton(onClick = { confirmExerciseDelete = false }) { Text("Abbrechen") } }
+        title = { DisplayTitle(npString(R.string.np_d54e3800f52b), ndot, fontSize = 24.sp) },
+        text = { Text(npString(R.string.np_f6de9f58f3d0), color = Muted) },
+        confirmButton = { TextButton(onClick = { confirmExerciseDelete = false; onDeleteExercise() }) { Text(npString(R.string.np_ffa5a8a7e21d), color = Red) } },
+        dismissButton = { TextButton(onClick = { confirmExerciseDelete = false }) { Text(npString(R.string.np_07af7cb30fca)) } }
     )
 
 }
@@ -5338,16 +5367,16 @@ private fun ExternalMediaCard(uri: Uri, isVideo: Boolean) {
     Column(Modifier.fillMaxWidth().clip(RoundedCornerShape(18.dp)).background(Panel2).padding(12.dp)) {
         val bitmap = image.value
         if (bitmap != null) {
-            androidx.compose.foundation.Image(bitmap, "Externes Übungsbild", Modifier.fillMaxWidth().height(180.dp), contentScale = ContentScale.Fit)
+            androidx.compose.foundation.Image(bitmap, npString(R.string.np_a5f223348642), Modifier.fillMaxWidth().height(180.dp), contentScale = ContentScale.Fit)
         } else {
-            Text(if (youtubeId != null) "▶  YOUTUBE-VIDEO" else if (isVideo) "▶  VIDEO-LINK" else "▧  BILD-LINK",
+            Text(if (youtubeId != null) npString(R.string.np_6b75f65ab453) else if (isVideo) npString(R.string.np_d2c05164a3b3) else npString(R.string.np_4bd2f3421aa0),
                 color = White, fontSize = 14.sp)
         }
         Spacer(Modifier.height(8.dp))
         Text(uri.host.orEmpty(), color = Muted, fontSize = 11.sp)
         TextButton(onClick = {
             runCatching { context.startActivity(android.content.Intent(android.content.Intent.ACTION_VIEW, uri)) }
-        }) { Text(if (youtubeId != null) "In YouTube öffnen ↗" else "Extern öffnen ↗") }
+        }) { Text(if (youtubeId != null) npString(R.string.np_5253512f28de) else npString(R.string.np_111250542e0b)) }
     }
 }
 
@@ -5361,16 +5390,16 @@ private fun ExerciseMediaViewer(mediaPath: String, isVideo: Boolean) {
         val target = external
         Surface(color = Panel2, shape = RoundedCornerShape(18.dp), modifier = Modifier.fillMaxWidth()) {
             Column(Modifier.padding(16.dp)) {
-                Text("▶  VIDEOANLEITUNG", color = White, fontSize = 14.sp)
-                Text(if (external == null) "Für lokale Videos bitte einen HTTPS-Link hinterlegen." else "Video wird in einer externen App geöffnet.", color = Muted, fontSize = 11.sp)
+                Text(npString(R.string.np_5af65216e8d2), color = White, fontSize = 14.sp)
+                Text(if (external == null) npString(R.string.np_992b25cdc80c) else npString(R.string.np_6b3a650f4661), color = Muted, fontSize = 11.sp)
                 TextButton(enabled = target != null, onClick = {
                     target?.let { uri ->
                         runCatching {
                             context.startActivity(Intent(Intent.ACTION_VIEW, uri).apply {
                             })
-                        }.onFailure { Toast.makeText(context, "Keine passende Video-App gefunden.", Toast.LENGTH_SHORT).show() }
+                        }.onFailure { Toast.makeText(context, npString(R.string.np_6a2fce0e54c0), Toast.LENGTH_SHORT).show() }
                     }
-                }) { Text("Video öffnen ↗", color = White) }
+                }) { Text(npString(R.string.np_b13ccfe84c88), color = White) }
             }
         }
         return
@@ -5396,7 +5425,7 @@ private fun ExerciseMediaViewer(mediaPath: String, isVideo: Boolean) {
             if (bitmap != null) {
                 androidx.compose.foundation.Image(
                     bitmap = bitmap,
-                    contentDescription = "Übungsbild",
+                    contentDescription = npString(R.string.np_6ecaaff87dea),
                     contentScale = ContentScale.Crop,
                     modifier = Modifier.fillMaxSize()
                 )
@@ -5423,19 +5452,19 @@ private fun MusclePickerDialog(
             shape = RoundedCornerShape(26.dp)
         ) {
             Column(Modifier.padding(18.dp)) {
-                Text("MUSKELGRUPPEN", color = White, fontSize = 20.sp)
+                Text(npString(R.string.np_51c52096e45b), color = White, fontSize = 20.sp)
                 Spacer(Modifier.height(10.dp))
                 OutlinedTextField(
                     value = search,
                     onValueChange = { search = it.take(50) },
-                    label = { Text("Muskelgruppe suchen") },
+                    label = { Text(npString(R.string.np_c0ddbd78adad)) },
                     singleLine = true,
                     modifier = Modifier.fillMaxWidth()
                 )
                 Spacer(Modifier.height(10.dp))
                 Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                    ChoiceChip("Hauptmuskel", !selectingSecondary, Modifier.weight(1f)) { selectingSecondary = false }
-                    ChoiceChip("Weitere Muskeln", selectingSecondary, Modifier.weight(1f)) { selectingSecondary = true }
+                    ChoiceChip(npString(R.string.np_75993db09725), !selectingSecondary, Modifier.weight(1f)) { selectingSecondary = false }
+                    ChoiceChip(npString(R.string.np_9d1181d822cc), selectingSecondary, Modifier.weight(1f)) { selectingSecondary = true }
                 }
                 Spacer(Modifier.height(8.dp))
                 Column(Modifier.heightIn(max = 370.dp).verticalScroll(rememberScrollState())) {
@@ -5443,7 +5472,7 @@ private fun MusclePickerDialog(
                         it.label.contains(search, ignoreCase = true) || it.category.contains(search, ignoreCase = true)
                     }
                     filtered.groupBy { it.category }.forEach { (category, entries) ->
-                        Text(category.uppercase(Locale.GERMAN), color = Muted, fontSize = 11.sp,
+                        Text(category.uppercase(npLocale()), color = Muted, fontSize = 11.sp,
                             modifier = Modifier.padding(top = 10.dp, bottom = 4.dp))
                         entries.forEach { option ->
                             val selected = if (selectingSecondary) option.id in selectedSecondary else option.id == selectedPrimary
@@ -5468,8 +5497,8 @@ private fun MusclePickerDialog(
                     }
                 }
                 Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.End) {
-                    TextButton(onClick = onDismiss) { Text("Abbrechen") }
-                    TextButton(onClick = { onApply(selectedPrimary, selectedSecondary.toList()) }) { Text("Übernehmen") }
+                    TextButton(onClick = onDismiss) { Text(npString(R.string.np_07af7cb30fca)) }
+                    TextButton(onClick = { onApply(selectedPrimary, selectedSecondary.toList()) }) { Text(npString(R.string.np_594308426372)) }
                 }
             }
         }
@@ -5488,7 +5517,7 @@ private fun NewExerciseDialog(
     val haptic = LocalHapticFeedback.current
     var name by remember { mutableStateOf(initialExercise?.name ?: "") }
     var primaryMuscleId by remember { mutableStateOf(initialExercise?.primaryMuscleId?.takeIf { it.isNotBlank() }
-        ?: muscleCatalogue.firstOrNull { it.label.equals(initialExercise?.muscle, true) }?.id ?: "chest") }
+        ?: muscleCatalogue.firstOrNull { it.rawCategory.equals(initialExercise?.muscle, true) }?.id ?: "chest") }
     var muscleSelectionChanged by remember { mutableStateOf(false) }
     val secondaryMuscles = remember { mutableStateListOf<String>().apply { addAll(initialExercise?.secondaryMuscleIds.orEmpty()) } }
     var musclePickerOpen by remember { mutableStateOf(false) }
@@ -5514,7 +5543,7 @@ private fun NewExerciseDialog(
                 val isVid = mime.startsWith("video/")
                 val ext = if (isVid) "mp4" else "jpg"
                 val dir = File(context.filesDir, "exercise_media").apply { mkdirs() }
-                val dest = File(dir, "media_${UUID.randomUUID()}.$ext")
+                val dest = File(dir, "media_${UUID.randomUUID()}.${ext}")
                 context.contentResolver.openInputStream(uri)?.use { input ->
                     dest.outputStream().use { output -> input.copyTo(output) }
                 }
@@ -5533,11 +5562,11 @@ private fun NewExerciseDialog(
             shape = RoundedCornerShape(28.dp)
         ) {
             Column(Modifier.verticalScroll(rememberScrollState()).padding(22.dp)) {
-                DisplayTitle(if (initialExercise == null) "NEUE ÜBUNG" else "ÜBUNG BEARBEITEN", ndot, fontSize = 24.sp)
+                DisplayTitle(if (initialExercise == null) npString(R.string.np_12b67bb6f916) else npString(R.string.np_e3417b4e7753), ndot, fontSize = 24.sp)
                 if (!targetWorkoutName.isNullOrBlank()) {
                     Spacer(Modifier.height(4.dp))
                     Text(
-                        "Wird direkt in „$targetWorkoutName“ eingetragen.",
+                        npString(R.string.np_5b4eeaeb72a7 , targetWorkoutName),
                         color = Muted,
                         fontSize = 11.sp
                     )
@@ -5547,7 +5576,7 @@ private fun NewExerciseDialog(
                 OutlinedTextField(
                     value = name,
                     onValueChange = { name = it.take(60) },
-                    label = { Text("Name der Übung") },
+                    label = { Text(npString(R.string.np_78b296080ae2)) },
                     singleLine = true,
                     modifier = Modifier.fillMaxWidth()
                 )
@@ -5558,25 +5587,25 @@ private fun NewExerciseDialog(
                     shape = RoundedCornerShape(16.dp)
                 ) {
                     Column(Modifier.padding(14.dp)) {
-                        Text("MUSKELGRUPPEN AUSWÄHLEN  ›", color = White, fontSize = 12.sp)
+                        Text(npString(R.string.np_32fcc564de8a), color = White, fontSize = 12.sp)
                         Spacer(Modifier.height(5.dp))
-                        Text("Hauptmuskel: ${muscleName(primaryMuscleId)}", color = White, fontSize = 14.sp)
+                        Text(npString(R.string.np_40f41025e969 , muscleName(primaryMuscleId)), color = White, fontSize = 14.sp)
                         if (secondaryMuscles.isNotEmpty()) {
-                            Text("Weitere: ${secondaryMuscles.joinToString(", ") { muscleName(it) }}", color = Muted, fontSize = 11.sp)
+                            Text(npString(R.string.np_86d19c0a8ded , secondaryMuscles.joinToString(", ") { muscleName(it) }), color = Muted, fontSize = 11.sp)
                         }
                     }
                 }
 
-                SectionLabel("ÜBUNGSTYP", topPadding = 16.dp, bottomPadding = 8.dp)
+                SectionLabel(npString(R.string.np_82ef343eef67), topPadding = 16.dp, bottomPadding = 8.dp)
                 Row(
                     modifier = Modifier.horizontalScroll(rememberScrollState()),
                     horizontalArrangement = Arrangement.spacedBy(6.dp)
                 ) {
                     listOf(
-                        ExerciseKind.WEIGHT to "Gewicht",
-                        ExerciseKind.BODYWEIGHT to "Körpergewicht",
-                        ExerciseKind.TIMED to "Zeit",
-                        ExerciseKind.CARDIO to "Cardio"
+                        ExerciseKind.WEIGHT to npString(R.string.np_b80121b7ef4f),
+                        ExerciseKind.BODYWEIGHT to npString(R.string.np_f75cff63870c),
+                        ExerciseKind.TIMED to npString(R.string.np_d34f8dd0e537),
+                        ExerciseKind.CARDIO to npString(R.string.np_eb013efc32e2)
                     ).forEach { (k, label) ->
                         ChoiceChip(label, kind == k, Modifier.width(115.dp)) {
                             kind = k
@@ -5586,30 +5615,30 @@ private fun NewExerciseDialog(
                 }
 
                 if (kind == ExerciseKind.CARDIO) {
-                    SectionLabel("CARDIO-ART", topPadding = 12.dp, bottomPadding = 6.dp)
+                    SectionLabel(npString(R.string.np_d8331d85aac4), topPadding = 12.dp, bottomPadding = 6.dp)
                     Row(Modifier.horizontalScroll(rememberScrollState()), horizontalArrangement = Arrangement.spacedBy(6.dp)) {
-                        listOf("Laufen", "Radfahren", "Rudern", "Schwimmen", "Gehen", "Crosstrainer", "Seilspringen").forEach { suggestion ->
+                        listOf(npString(R.string.np_228d2ab8ff7e), npString(R.string.np_8f60a5524b26), npString(R.string.np_147fca586077), npString(R.string.np_de210adba382), npString(R.string.np_bcff9160c016), "Crosstrainer", "Seilspringen").forEach { suggestion ->
                             ChoiceChip(suggestion, name == suggestion, Modifier.width(112.dp)) { name = suggestion }
                         }
                     }
                 }
                 if (kind == ExerciseKind.AMRAP) {
                     TextButton(onClick = {
-                        name = "Cindy"
-                        description = "20 Minuten AMRAP: 5 Klimmzüge, 10 Liegestütze, 15 Kniebeugen pro Runde."
+                        name = npString(R.string.np_6ac07aa166b6)
+                        description = npString(R.string.np_4b84c437442d)
                         targetSeconds = "1200"
                         targetReps = "1"
-                    }) { Text("CINDY-VORLAGE (20 MIN.)") }
+                    }) { Text(npString(R.string.np_c1c8487f611d)) }
                 }
                 Spacer(Modifier.height(12.dp))
                 when (kind) {
                     ExerciseKind.CARDIO, ExerciseKind.AMRAP -> {
                         OutlinedTextField(targetSeconds, { targetSeconds = it.filter(Char::isDigit).take(5) },
-                            label = { Text("Dauer in Sekunden") }, modifier = Modifier.fillMaxWidth(),
+                            label = { Text(npString(R.string.np_ca4712174561)) }, modifier = Modifier.fillMaxWidth(),
                             keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number))
                         if (kind == ExerciseKind.AMRAP) {
                             OutlinedTextField(targetReps, { targetReps = it.filter(Char::isDigit).take(4) },
-                                label = { Text("Zielrunden") }, modifier = Modifier.fillMaxWidth(),
+                                label = { Text(npString(R.string.np_d70a08bcf3ec)) }, modifier = Modifier.fillMaxWidth(),
                                 keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number))
                         }
                     }
@@ -5619,7 +5648,7 @@ private fun NewExerciseDialog(
                             OutlinedTextField(
                                 value = targetWeight,
                                 onValueChange = { targetWeight = it.take(6) },
-                                label = { Text("Ziel-Gewicht (kg)") },
+                                label = { Text(npString(R.string.np_7662a4352ac6)) },
                                 singleLine = true,
                                 keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Decimal),
                                 modifier = Modifier.weight(1f)
@@ -5627,7 +5656,7 @@ private fun NewExerciseDialog(
                             OutlinedTextField(
                                 value = targetReps,
                                 onValueChange = { targetReps = it.filter(Char::isDigit).take(4) },
-                                label = { Text("Ziel-Wdh.") },
+                                label = { Text(npString(R.string.np_af011b0785ed)) },
                                 singleLine = true,
                                 keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
                                 modifier = Modifier.weight(1f)
@@ -5638,7 +5667,7 @@ private fun NewExerciseDialog(
                         OutlinedTextField(
                             value = targetReps,
                             onValueChange = { targetReps = it.filter(Char::isDigit).take(4) },
-                            label = { Text("Ziel-Wiederholungen") },
+                            label = { Text(npString(R.string.np_696c877954da)) },
                             singleLine = true,
                             keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
                             modifier = Modifier.fillMaxWidth()
@@ -5649,7 +5678,7 @@ private fun NewExerciseDialog(
                             OutlinedTextField(
                                 value = targetReps,
                                 onValueChange = { targetReps = it.filter(Char::isDigit).take(4) },
-                                label = { Text("Wdh. (1 = Halten)") },
+                                label = { Text(npString(R.string.np_733e0e2f101e)) },
                                 singleLine = true,
                                 keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
                                 modifier = Modifier.weight(1f)
@@ -5657,7 +5686,7 @@ private fun NewExerciseDialog(
                             OutlinedTextField(
                                 value = targetSeconds,
                                 onValueChange = { targetSeconds = it.filter(Char::isDigit).take(5) },
-                                label = { Text("Zeit (Sekunden)") },
+                                label = { Text(npString(R.string.np_6dc754e2bb60)) },
                                 singleLine = true,
                                 keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
                                 modifier = Modifier.weight(1f)
@@ -5671,39 +5700,39 @@ private fun NewExerciseDialog(
                   Surface(color = Panel2, shape = RoundedCornerShape(16.dp),
                       modifier = Modifier.fillMaxWidth().clickable { showExerciseDetails = !showExerciseDetails }) {
                       Row(Modifier.padding(14.dp), verticalAlignment = Alignment.CenterVertically) {
-                          Text("BESCHREIBUNG & HINWEISE", color = White, fontSize = 12.sp, modifier = Modifier.weight(1f))
+                          Text(npString(R.string.np_c5aa0094e224), color = White, fontSize = 12.sp, modifier = Modifier.weight(1f))
                           Text(if (showExerciseDetails) "⌃" else "›", color = Muted)
                       }
                   }
                   if (showExerciseDetails) {
                       Spacer(Modifier.height(8.dp))
                       OutlinedTextField(value = description, onValueChange = { description = it.take(400) },
-                          label = { Text("Beschreibung & Ausführung") }, minLines = 2, maxLines = 4,
+                          label = { Text(npString(R.string.np_01a5e0ece5e4)) }, minLines = 2, maxLines = 4,
                           modifier = Modifier.fillMaxWidth())
                       OutlinedTextField(value = stepsText, onValueChange = { stepsText = it.take(4000) },
-                          label = { Text("Ausführungsschritte · eine Zeile pro Schritt") }, minLines = 2, maxLines = 5,
+                          label = { Text(npString(R.string.np_77400e4f0ec5)) }, minLines = 2, maxLines = 5,
                           modifier = Modifier.fillMaxWidth())
                   }
                   Spacer(Modifier.height(8.dp))
                   Surface(color = Panel2, shape = RoundedCornerShape(16.dp),
                       modifier = Modifier.fillMaxWidth().clickable { showExerciseMedia = !showExerciseMedia }) {
                       Row(Modifier.padding(14.dp), verticalAlignment = Alignment.CenterVertically) {
-                          Text("MEDIEN / LINKS", color = White, fontSize = 12.sp, modifier = Modifier.weight(1f))
+                          Text(npString(R.string.np_d5e5956e6aa4), color = White, fontSize = 12.sp, modifier = Modifier.weight(1f))
                           Text(if (showExerciseMedia) "⌃" else "›", color = Muted)
                       }
                   }
                   if (showExerciseMedia) {
-                SectionLabel("FOTO ODER VIDEO", topPadding = 16.dp, bottomPadding = 8.dp)
+                SectionLabel(npString(R.string.np_e1e41fb2b17a), topPadding = 16.dp, bottomPadding = 8.dp)
                 Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                     ChoiceChip(
-                        label = if (copiedMediaPath.isNotBlank() && !copiedMediaIsVideo) "✓ Foto gewählt" else "+ Foto wählen",
+                        label = if (copiedMediaPath.isNotBlank() && !copiedMediaIsVideo) npString(R.string.np_31e7a39d201a) else npString(R.string.np_42a94d15d8f2),
                         selected = copiedMediaPath.isNotBlank() && !copiedMediaIsVideo,
                         modifier = Modifier.weight(1f)
                     ) {
                         mediaPicker.launch("image/*")
                     }
                     ChoiceChip(
-                        label = if (copiedMediaPath.isNotBlank() && copiedMediaIsVideo) "✓ Video gewählt" else "+ Video wählen",
+                        label = if (copiedMediaPath.isNotBlank() && copiedMediaIsVideo) npString(R.string.np_81a729ac41c5) else npString(R.string.np_85a30e7cb28e),
                         selected = copiedMediaPath.isNotBlank() && copiedMediaIsVideo,
                         modifier = Modifier.weight(1f)
                     ) {
@@ -5715,21 +5744,21 @@ private fun NewExerciseDialog(
                 OutlinedTextField(
                     value = mediaUrl,
                     onValueChange = { mediaUrl = it.take(2048) },
-                    label = { Text("Externer Medienlink (HTTPS)") },
+                    label = { Text(npString(R.string.np_a26b53ae58e2)) },
                     singleLine = true,
                     modifier = Modifier.fillMaxWidth()
                 )
                 Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                    ChoiceChip("Video / YouTube", mediaUrlIsVideo, Modifier.weight(1f)) { mediaUrlIsVideo = true }
-                    ChoiceChip("Bild", !mediaUrlIsVideo, Modifier.weight(1f)) { mediaUrlIsVideo = false }
+                    ChoiceChip(npString(R.string.np_ae3c9b5e31db), mediaUrlIsVideo, Modifier.weight(1f)) { mediaUrlIsVideo = true }
+                    ChoiceChip(npString(R.string.np_d42485349869), !mediaUrlIsVideo, Modifier.weight(1f)) { mediaUrlIsVideo = false }
                 }
                 if (mediaUrl.isNotBlank() && validatedMediaUrl(mediaUrl) == null) {
-                    Text("Bitte einen gültigen HTTPS-Link eingeben.", color = Red, fontSize = 11.sp)
+                    Text(npString(R.string.np_7fb362e8d0bf), color = Red, fontSize = 11.sp)
                 }
                   }
                 Spacer(Modifier.height(18.dp))
                 Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.End) {
-                    TextButton(onClick = onDismiss) { Text("Abbrechen") }
+                    TextButton(onClick = onDismiss) { Text(npString(R.string.np_07af7cb30fca)) }
                     TextButton(
                         enabled = name.isNotBlank() && (mediaUrl.isBlank() || validatedMediaUrl(mediaUrl) != null),
                         onClick = {
@@ -5737,7 +5766,7 @@ private fun NewExerciseDialog(
                                 Exercise(
                                     id = initialExercise?.id ?: UUID.randomUUID().toString(),
                                     name = name.trim(),
-                                    muscle = if (initialExercise != null && !muscleSelectionChanged) initialExercise.muscle else muscleCatalogue.firstOrNull { it.id == primaryMuscleId }?.category ?: "Ganzkörper",
+                                    muscle = if (initialExercise != null && !muscleSelectionChanged) initialExercise.muscle else muscleCatalogue.firstOrNull { it.id == primaryMuscleId }?.rawCategory ?: "Ganzkörper",
                                     primaryMuscleId = if (initialExercise != null && !muscleSelectionChanged) initialExercise.primaryMuscleId else primaryMuscleId,
                                     secondaryMuscleIds = secondaryMuscles.toList(),
                                     kind = kind,
@@ -5751,7 +5780,7 @@ private fun NewExerciseDialog(
                                 )
                             )
                         }
-                    ) { Text(if (initialExercise == null) "Anlegen" else "Speichern") }
+                    ) { Text(if (initialExercise == null) npString(R.string.np_846460c3195a) else npString(R.string.np_70b73bbc118d)) }
                 }
             }
         }
@@ -5798,7 +5827,7 @@ private fun AiExerciseImportDialog(
                     errorMsg = null
                 }
             }.onFailure {
-                errorMsg = "Datei konnte nicht gelesen werden."
+                errorMsg = npString(R.string.np_92859f8d2db5)
             }
         }
     }
@@ -5810,13 +5839,13 @@ private fun AiExerciseImportDialog(
             shape = RoundedCornerShape(28.dp)
         ) {
             Column(Modifier.verticalScroll(rememberScrollState()).padding(22.dp)) {
-                DisplayTitle("KI-ÜBUNG IMPORT", ndot, fontSize = 24.sp)
+                DisplayTitle(npString(R.string.np_f330ec3da298), ndot, fontSize = 24.sp)
                 Spacer(Modifier.height(6.dp))
                 Text(
                     buildString {
-                        append("Format: $NPEF_FORMAT_ID · Sende die Vorlage an Gemini, ChatGPT oder Claude und füge die JSON-Antwort hier ein.")
+                        append(npString(R.string.np_ee22333397e5, NPEF_FORMAT_ID))
                         if (!targetWorkoutName.isNullOrBlank()) {
-                            append(" Importierte Übungen landen direkt in „$targetWorkoutName“.")
+                            append(npString(R.string.np_748297d0d36e, targetWorkoutName))
                         }
                     },
                     color = Muted,
@@ -5826,10 +5855,10 @@ private fun AiExerciseImportDialog(
 
                 Spacer(Modifier.height(12.dp))
                 Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                    ChoiceChip("An KI-App senden", true, Modifier.weight(1.2f)) {
+                    ChoiceChip(npString(R.string.np_6202f94efd35), true, Modifier.weight(1.2f)) {
                         onSharePrompt()
                     }
-                    ChoiceChip(".json Datei", false, Modifier.weight(0.8f)) {
+                    ChoiceChip(npString(R.string.np_b5e5727b7dfd), false, Modifier.weight(0.8f)) {
                         fileImporter.launch(arrayOf("application/json", "text/*"))
                     }
                 }
@@ -5841,7 +5870,7 @@ private fun AiExerciseImportDialog(
                         jsonInput = it
                         errorMsg = null
                     },
-                    label = { Text("JSON-Antwort hier einfügen") },
+                    label = { Text(npString(R.string.np_d989fa52d71e)) },
                     minLines = 5,
                     maxLines = 9,
                     textStyle = TextStyle(fontFamily = FontFamily.Default, fontSize = 11.sp),
@@ -5862,21 +5891,21 @@ private fun AiExerciseImportDialog(
                     TextButton(onClick = {
                         val clipboard = context.getSystemService(Context.CLIPBOARD_SERVICE) as? ClipboardManager
                         clipboard?.setPrimaryClip(ClipData.newPlainText("NPEF Export", exportNpefJson(existingExercises)))
-                        Toast.makeText(context, "Katalog als JSON kopiert", Toast.LENGTH_SHORT).show()
+                        Toast.makeText(context, npString(R.string.np_c918198212cb), Toast.LENGTH_SHORT).show()
                     }) {
-                        Text("Katalog kopieren", color = Muted, fontSize = 11.sp)
+                        Text(npString(R.string.np_508fde77ee49), color = Muted, fontSize = 11.sp)
                     }
 
                     Row {
-                        TextButton(onClick = onDismiss) { Text("Abbrechen") }
+                        TextButton(onClick = onDismiss) { Text(npString(R.string.np_07af7cb30fca)) }
                         TextButton(
                             enabled = jsonInput.isNotBlank(),
                             onClick = {
                                 parseNpefExercises(jsonInput)
                                     .onSuccess { parsed -> onImport(parsed) }
-                                    .onFailure { err -> errorMsg = err.message ?: "Ungültiges JSON-Format." }
+                                    .onFailure { err -> errorMsg = err.message ?: npString(R.string.np_74ba7ad179b9) }
                             }
-                        ) { Text("Importieren") }
+                        ) { Text(npString(R.string.np_7d4a3f2aaafe)) }
                     }
                 }
             }
@@ -5919,7 +5948,7 @@ private fun GlyphNav(
             .padding(horizontal = 18.dp, vertical = 14.dp)
             .fillMaxWidth()
             .height(64.dp),
-        color = Color(0xE6252525),
+        color = npNeutral(0xE6252525),
         shape = RoundedCornerShape(34.dp),
         shadowElevation = 14.dp
     ) {
@@ -5956,7 +5985,7 @@ private fun GlyphNav(
                         label = "nav_icon_scale"
                     )
                     val iconColor = androidx.compose.ui.graphics.lerp(
-                        Color(0xFF969696),
+                        npNeutral(0xFF969696),
                         Bg,
                         activeWeight
                     )
@@ -6163,7 +6192,7 @@ private fun ProgressStyleTile(
             horizontalAlignment = Alignment.CenterHorizontally,
             verticalArrangement = Arrangement.Center
         ) {
-            preview(if (selected) Bg else White, if (selected) Color(0xFFB5B4AF) else Color(0xFF4A4A4A))
+            preview(if (selected) Bg else White, if (selected) Color(0xFFB5B4AF) else npNeutral(0xFF4A4A4A))
             Spacer(Modifier.height(10.dp))
             Text(label, color = fg, fontSize = 13.sp, fontWeight = if (selected) FontWeight.Medium else FontWeight.Normal)
         }
@@ -6205,22 +6234,22 @@ private fun SetupScreen(
         }
     }
 
-    Screen(ndot, "DEINE REGELN.", "EINSTELLUNGEN", "Einmal planen. Im Alltag nur erledigen.") {
+    Screen(ndot, npString(R.string.np_b0bae95080a9), npString(R.string.np_5fbb9f0b064b), npString(R.string.np_b86312ffdb86)) {
         Row(
             Modifier.fillMaxWidth().padding(top = 26.dp, bottom = 4.dp),
             verticalAlignment = Alignment.CenterVertically,
             horizontalArrangement = Arrangement.SpaceBetween
         ) {
-            Text("AUFGABEN & WOCHENZIELE", color = Muted, fontFamily = FontFamily.Default, fontSize = 10.sp, letterSpacing = 1.7.sp)
+            Text(npString(R.string.np_2af464a2d2d7), color = Muted, fontFamily = FontFamily.Default, fontSize = 10.sp, letterSpacing = 1.7.sp)
             TextButton(onClick = onAdd) {
-                Text("+ NEU", color = White, fontFamily = FontFamily.Default, fontSize = 11.sp, letterSpacing = 1.7.sp)
+                Text(npString(R.string.np_06df2fea07b8), color = White, fontFamily = FontFamily.Default, fontSize = 11.sp, letterSpacing = 1.7.sp)
             }
         }
 
         if (rules.isEmpty()) {
             Surface(color = Panel, shape = RoundedCornerShape(22.dp), modifier = Modifier.fillMaxWidth().padding(vertical = 5.dp)) {
                 Text(
-                    "Noch keine Aufgaben oder Wochenziele angelegt. Tippe oben auf „+ NEU“.",
+                    npString(R.string.np_adf9b9b52535),
                     color = Muted,
                     fontSize = 12.sp,
                     modifier = Modifier.padding(18.dp)
@@ -6313,14 +6342,16 @@ private fun SetupScreen(
         }
 
         Spacer(Modifier.height(16.dp))
-        SectionLabel("DARSTELLUNG")
+        SectionLabel(npString(R.string.np_b8331e795763))
+        NPlannerAppearanceSettings()
+        Spacer(Modifier.height(10.dp))
         Surface(color = Panel, shape = RoundedCornerShape(22.dp), modifier = Modifier.fillMaxWidth()) {
             Column(Modifier.padding(16.dp)) {
-                Text("ÜBERSCHRIFTEN", fontSize = 16.sp, color = White, fontWeight = FontWeight.Medium)
-                Text("Normaler Text bleibt in der Systemschrift.", fontSize = 11.sp, color = Muted)
+                Text(npString(R.string.np_29db02be308f), fontSize = 16.sp, color = White, fontWeight = FontWeight.Medium)
+                Text(npString(R.string.np_ed3994287ff4), fontSize = 11.sp, color = Muted)
                 Spacer(Modifier.height(12.dp))
                 Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                    listOf(false to "Klassisch", true to "N-Dot").forEach { (dot, label) ->
+                    listOf(false to npString(R.string.np_2cc58a112d0a), true to npString(R.string.np_db4262bdee36)).forEach { (dot, label) ->
                         Surface(
                             modifier = Modifier.weight(1f).clickable { onHeadingStyleChange(dot) },
                             color = if (useDotHeadings == dot) White else Panel2,
@@ -6336,33 +6367,33 @@ private fun SetupScreen(
                     }
                 }
                 Spacer(Modifier.height(10.dp))
-                DisplayTitle("NPLANNER", ndot, fontSize = 25.sp)
+                DisplayTitle(npString(R.string.np_42c1112fd679), ndot, fontSize = 25.sp)
             }
         }
         Surface(color = Panel, shape = RoundedCornerShape(22.dp), modifier = Modifier.fillMaxWidth().padding(top = 10.dp)) {
             Column(Modifier.padding(16.dp)) {
-                Text("FORTSCHRITT HEUTE", fontSize = 16.sp, color = White, fontWeight = FontWeight.Medium)
-                Text("Anzeige auf dem Heute-Bildschirm.", fontSize = 11.sp, color = Muted)
+                Text(npString(R.string.np_27afe8e47ea3), fontSize = 16.sp, color = White, fontWeight = FontWeight.Medium)
+                Text(npString(R.string.np_e35fa12ca640), fontSize = 11.sp, color = Muted)
                 Spacer(Modifier.height(12.dp))
                 Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
-                    ProgressStyleTile("Balken", !orbit, Modifier.weight(1f), { onProgressStyleChange(false) }) { fg, track -> MiniBars(fg, track) }
-                    ProgressStyleTile("Kreis", orbit, Modifier.weight(1f), { onProgressStyleChange(true) }) { fg, track -> MiniRing(fg, track) }
+                    ProgressStyleTile(npString(R.string.np_e51bd6be1fe7), !orbit, Modifier.weight(1f), { onProgressStyleChange(false) }) { fg, track -> MiniBars(fg, track) }
+                    ProgressStyleTile(npString(R.string.np_78ba515b2614), orbit, Modifier.weight(1f), { onProgressStyleChange(true) }) { fg, track -> MiniRing(fg, track) }
                 }
             }
         }
         Surface(color = Panel, shape = RoundedCornerShape(22.dp), modifier = Modifier.fillMaxWidth().padding(top = 10.dp)) {
             Column(Modifier.padding(16.dp)) {
-                Text("RÜCKBLICK-DARSTELLUNG", fontSize = 16.sp, color = White, fontWeight = FontWeight.Medium)
-                Text("Minimalistische Punkte oder Kalender-Ansicht.", fontSize = 11.sp, color = Muted)
+                Text(npString(R.string.np_418ebf21947a), fontSize = 16.sp, color = White, fontWeight = FontWeight.Medium)
+                Text(npString(R.string.np_349e9979c0db), fontSize = 11.sp, color = Muted)
                 Spacer(Modifier.height(12.dp))
                 Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
-                    ProgressStyleTile("Punkte", historyDots, Modifier.weight(1f), { onHistoryStyleChange(true) }) { fg, track -> MiniHistoryDots(fg, track) }
-                    ProgressStyleTile("Kalender", !historyDots, Modifier.weight(1f), { onHistoryStyleChange(false) }) { fg, track -> MiniHistoryCalendar(fg, track) }
+                    ProgressStyleTile(npString(R.string.np_b6dafaa1c8b5), historyDots, Modifier.weight(1f), { onHistoryStyleChange(true) }) { fg, track -> MiniHistoryDots(fg, track) }
+                    ProgressStyleTile(npString(R.string.np_33fe92f625e5), !historyDots, Modifier.weight(1f), { onHistoryStyleChange(false) }) { fg, track -> MiniHistoryCalendar(fg, track) }
                 }
             }
         }
 
-        SectionLabel("ENTWICKLER & TEST", topPadding = 22.dp, bottomPadding = 10.dp)
+        SectionLabel(npString(R.string.np_9028b65aa0a5), topPadding = 22.dp, bottomPadding = 10.dp)
         Surface(
             color = Panel,
             shape = RoundedCornerShape(22.dp),
@@ -6375,10 +6406,10 @@ private fun SetupScreen(
                 verticalAlignment = Alignment.CenterVertically
             ) {
                 Column(Modifier.weight(1f)) {
-                    Text("TEST-MODUS WOCHENZIELE", fontSize = 15.sp, color = White, fontWeight = FontWeight.Medium)
+                    Text(npString(R.string.np_4711c2206922), fontSize = 15.sp, color = White, fontWeight = FontWeight.Medium)
                     Text(
-                        if (testMode) "Aktiv: Wochenziele lassen sich beliebig oft am selben Tag hoch- und runterzählen."
-                        else "Aus: Wochenziele sind regulär maximal 1× pro Tag abhakbar.",
+                        if (testMode) npString(R.string.np_709bae28f41d)
+                        else npString(R.string.np_05942485fc9b),
                         fontSize = 11.sp,
                         color = Muted
                     )
@@ -6398,15 +6429,15 @@ private fun SetupScreen(
         }
 
         Text(
-            "Halte eine Aufgabe gedrückt, ziehe sie an die gewünschte Position und lasse los.",
+            npString(R.string.np_3839958189dd),
             color = Muted,
             fontSize = 11.sp,
             modifier = Modifier.padding(horizontal = 6.dp, vertical = 18.dp)
         )
-        HorizontalDivider(color = Color(0xFF242424), modifier = Modifier.padding(top = 6.dp))
+        HorizontalDivider(color = npNeutral(0xFF242424), modifier = Modifier.padding(top = 6.dp))
         Text(
-            "NPLANNER · VERSION 0.42",
-            color = Color(0xFFB6B6B6),
+            npString(R.string.np_69a89741235d),
+            color = npNeutral(0xFFB6B6B6),
             fontFamily = FontFamily.Default,
             fontSize = 10.sp,
             letterSpacing = 1.3.sp,
@@ -6476,23 +6507,23 @@ private fun NewTaskDialog(ndot: FontFamily, onDismiss: () -> Unit, onCreate: (Ru
     Dialog(onDismissRequest = onDismiss, properties = DialogProperties(usePlatformDefaultWidth = false)) {
         Surface(modifier = Modifier.padding(horizontal = 16.dp).fillMaxWidth(), color = Panel, shape = RoundedCornerShape(28.dp)) {
             Column(Modifier.verticalScroll(rememberScrollState()).padding(22.dp)) {
-                DisplayTitle("NEUE AUFGABE", ndot, fontSize = 24.sp)
+                DisplayTitle(npString(R.string.np_060813ffb8c9), ndot, fontSize = 24.sp)
                 Spacer(Modifier.height(14.dp))
                 OutlinedTextField(
                     value = name,
                     onValueChange = { name = it.take(60) },
-                    label = { Text("Bezeichnung") },
+                    label = { Text(npString(R.string.np_a0b60ec855e9)) },
                     singleLine = true,
                     modifier = Modifier.fillMaxWidth()
                 )
 
-                SectionLabel("ART")
+                SectionLabel(npString(R.string.np_abfe09c3932d))
                 Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
                     listOf(
                         RuleKind.FIXED to "Uhrzeit",
-                        RuleKind.INTERVAL to "Intervall",
-                        RuleKind.ALLDAY to "Ganztägig",
-                        RuleKind.WEEKLY to "Wochenziel"
+                        RuleKind.INTERVAL to npString(R.string.np_6c03c59685ba),
+                        RuleKind.ALLDAY to npString(R.string.np_e5721c734beb),
+                        RuleKind.WEEKLY to npString(R.string.np_d56d73957fc5)
                     ).forEach { (k, label) ->
                         ChoiceChip(label, kind == k, Modifier.weight(1f)) {
                             kind = k
@@ -6503,13 +6534,13 @@ private fun NewTaskDialog(ndot: FontFamily, onDismiss: () -> Unit, onCreate: (Ru
 
                 when (kind) {
                     RuleKind.FIXED -> {
-                        SectionLabel("UHRZEIT")
+                        SectionLabel(npString(R.string.np_b3acd2792395))
                         TimeBox("Uhrzeit", timeMin, ndot, Modifier.fillMaxWidth()) { pick(timeMin) { timeMin = it } }
                     }
                     RuleKind.INTERVAL -> {
-                        SectionLabel("ALLE")
+                        SectionLabel(npString(R.string.np_b8f128a679b7))
                         Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                            listOf(30 to "30 Min.", 60 to "1 Std.", 120 to "2 Std.", 240 to "4 Std.").forEach { (m, l) ->
+                            listOf(30 to npString(R.string.np_c7618bdb3fde), 60 to npString(R.string.np_d3a004e65a59), 120 to npString(R.string.np_c2c726a4f959), 240 to npString(R.string.np_0d949b4e9677)).forEach { (m, l) ->
                                 ChoiceChip(l, every == m, Modifier.weight(1f)) {
                                     every = m
                                     triggerHaptic(context, haptic, HapticStyle.TICK)
@@ -6518,11 +6549,11 @@ private fun NewTaskDialog(ndot: FontFamily, onDismiss: () -> Unit, onCreate: (Ru
                         }
                         Spacer(Modifier.height(10.dp))
                         Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
-                            TimeBox("Von", startMin, ndot, Modifier.weight(1f)) { pick(startMin) { startMin = it } }
-                            TimeBox("Bis", endMin, ndot, Modifier.weight(1f)) { pick(endMin) { endMin = it } }
+                            TimeBox(npString(R.string.np_a4b078f9eb7b), startMin, ndot, Modifier.weight(1f)) { pick(startMin) { startMin = it } }
+                            TimeBox(npString(R.string.np_0afaa0e566a1), endMin, ndot, Modifier.weight(1f)) { pick(endMin) { endMin = it } }
                         }
                         Text(
-                            if (endMin >= startMin) "$slotCount Zeitpunkte am Tag" else "„Bis“ muss nach „Von“ liegen.",
+                            if (endMin >= startMin) npString(R.string.np_9587a83db38f , slotCount) else npString(R.string.np_8e4bdae0da46),
                             color = Muted,
                             fontSize = 12.sp,
                             modifier = Modifier.padding(top = 10.dp)
@@ -6530,7 +6561,7 @@ private fun NewTaskDialog(ndot: FontFamily, onDismiss: () -> Unit, onCreate: (Ru
                     }
                     RuleKind.ALLDAY -> {}
                     RuleKind.WEEKLY -> {
-                        SectionLabel("ZIEL PRO WOCHE")
+                        SectionLabel(npString(R.string.np_5c4529318bde))
                         Row(
                             verticalAlignment = Alignment.CenterVertically,
                             horizontalArrangement = Arrangement.spacedBy(14.dp)
@@ -6546,7 +6577,7 @@ private fun NewTaskDialog(ndot: FontFamily, onDismiss: () -> Unit, onCreate: (Ru
                             }
                         }
                         Text(
-                            "Flexibel über die Woche hochzählen (1× bis 14×). Am Montag startet die Woche wieder bei 0.",
+                            npString(R.string.np_289c8b1461e3),
                             color = Muted,
                             fontSize = 12.sp,
                             modifier = Modifier.padding(top = 10.dp)
@@ -6555,9 +6586,9 @@ private fun NewTaskDialog(ndot: FontFamily, onDismiss: () -> Unit, onCreate: (Ru
                 }
 
                 if (kind != RuleKind.WEEKLY) {
-                    SectionLabel("WOCHENTAGE")
+                    SectionLabel(npString(R.string.np_950c2621787f))
                     Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
-                        listOf("Mo", "Di", "Mi", "Do", "Fr", "Sa", "So").forEachIndexed { i, d ->
+                        listOf(npString(R.string.np_91e885d8e5af), npString(R.string.np_fe564f789dc6), npString(R.string.np_6b7439b40105), npString(R.string.np_22bdf47be3fd), npString(R.string.np_aa77f314fab0), npString(R.string.np_50cf95cee822), npString(R.string.np_26c0ca793e8f)).forEachIndexed { i, d ->
                             val on = (i + 1) in days
                             Box(
                                 Modifier
@@ -6574,20 +6605,20 @@ private fun NewTaskDialog(ndot: FontFamily, onDismiss: () -> Unit, onCreate: (Ru
                     }
                 }
 
-                SectionLabel("WERTUNG")
+                SectionLabel(npString(R.string.np_3d943e57f928))
                 Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                    ChoiceChip("Pflichtziel", !optional, Modifier.weight(1f)) {
+                    ChoiceChip(npString(R.string.np_44e89254df74), !optional, Modifier.weight(1f)) {
                         optional = false
                         triggerHaptic(context, haptic, HapticStyle.TICK)
                     }
-                    ChoiceChip("Optional (Bonus)", optional, Modifier.weight(1f)) {
+                    ChoiceChip(npString(R.string.np_9ff8f89a6660), optional, Modifier.weight(1f)) {
                         optional = true
                         triggerHaptic(context, haptic, HapticStyle.TICK)
                     }
                 }
                 Text(
-                    if (optional) "Zählt nicht in den Perfect-Score – der Tag gilt auch ohne diese Aufgabe als perfekt."
-                    else "Muss erledigt sein, damit der Tag als perfekt (rot) gewertet wird.",
+                    if (optional) npString(R.string.np_61457fec99c1)
+                    else npString(R.string.np_b3dc4bdd3e5b),
                     color = Muted,
                     fontSize = 11.sp,
                     modifier = Modifier.padding(top = 8.dp)
@@ -6595,7 +6626,7 @@ private fun NewTaskDialog(ndot: FontFamily, onDismiss: () -> Unit, onCreate: (Ru
 
                 Spacer(Modifier.height(18.dp))
                 Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.End) {
-                    TextButton(onClick = onDismiss) { Text("Abbrechen") }
+                    TextButton(onClick = onDismiss) { Text(npString(R.string.np_07af7cb30fca)) }
                     TextButton(
                         enabled = valid,
                         onClick = {
@@ -6614,7 +6645,7 @@ private fun NewTaskDialog(ndot: FontFamily, onDismiss: () -> Unit, onCreate: (Ru
                                 )
                             )
                         }
-                    ) { Text("Anlegen") }
+                    ) { Text(npString(R.string.np_846460c3195a)) }
                 }
             }
         }
@@ -6638,4 +6669,4 @@ private fun SectionLabel(
 }
 
 private fun dayLabel(days: Set<Int>): String =
-    if (days.size == 7) "Täglich" else days.sorted().joinToString(" · ") { listOf("Mo", "Di", "Mi", "Do", "Fr", "Sa", "So")[it - 1] }
+    if (days.size == 7) npString(R.string.np_3e286c337675) else days.sorted().joinToString(" · ") { listOf(npString(R.string.np_91e885d8e5af), npString(R.string.np_fe564f789dc6), npString(R.string.np_6b7439b40105), npString(R.string.np_22bdf47be3fd), npString(R.string.np_aa77f314fab0), npString(R.string.np_50cf95cee822), npString(R.string.np_26c0ca793e8f))[it - 1] }

@@ -1,0 +1,434 @@
+<?xml version='1.0' encoding='utf-8'?>
+<resources>
+    <string name="np_0164e250ee12" formatted="false">"%1$s (Wochenziel)"</string>
+    <string name="np_01a5e0ece5e4" formatted="false">"Beschreibung &amp; Ausführung"</string>
+    <string name="np_05942485fc9b" formatted="false">"Aus: Wochenziele sind regulär maximal 1× pro Tag abhakbar."</string>
+    <string name="np_05bcabc4a9ba" formatted="false">"Workout-Name (Vorschlag anpassbar)"</string>
+    <string name="np_05def8f48ffa" formatted="false">"EMOM"</string>
+    <string name="np_060813ffb8c9" formatted="false">"NEUE AUFGABE"</string>
+    <string name="np_06bbdee649e4" formatted="false">"Diese AMRAP-Einheit wird aus Verlauf und Rekorden entfernt. Vorlagen bleiben erhalten."</string>
+    <string name="np_06df2fea07b8" formatted="false">"+ NEU"</string>
+    <string name="np_07af7cb30fca" formatted="false">"Abbrechen"</string>
+    <string name="np_081c6a21268a" formatted="false">"Workout löschen"</string>
+    <string name="np_08a05cd11652" formatted="false">"+ NEUES WORKOUT"</string>
+    <string name="np_0acd32441928" formatted="false">"Heute erledigt · %1$s× pro Woche%2$s"</string>
+    <string name="np_0afaa0e566a1" formatted="false">"Bis"</string>
+    <string name="np_0afe28becc37" formatted="false">"Brust"</string>
+    <string name="np_0ca5853904f5" formatted="false">"Freitag"</string>
+    <string name="np_0d704e60aba9" formatted="false">"VORLAGE LÖSCHEN?"</string>
+    <string name="np_0d949b4e9677" formatted="false">"4 Std."</string>
+    <string name="np_0e20248ad581" formatted="false">"JSON importieren  ↗"</string>
+    <string name="np_0e961ac28402" formatted="false">"%1$s Min."</string>
+    <string name="np_0fd0d5762ce7" formatted="false">"Großer Gesäßmuskel"</string>
+    <string name="np_10d6959edc6c" formatted="false">"Vorlage geladen: %1$s Übungen."</string>
+    <string name="np_10f171af156d" formatted="false">"%1$s Runden + %2$s Übungen"</string>
+    <string name="np_111250542e0b" formatted="false">"Extern öffnen ↗"</string>
+    <string name="np_115e71776c64" formatted="false">"VORBEREITUNG"</string>
+    <string name="np_1166fc3ed310" formatted="false">"KI-Vorlage kopiert – wähle eine KI-App"</string>
+    <string name="np_1221f3fe1563" formatted="false">"%1$s Sätze in dieser Einheit"</string>
+    <string name="np_12b67bb6f916" formatted="false">"NEUE ÜBUNG"</string>
+    <string name="np_133ef6da2558" formatted="false">"VORLAGE BEARBEITEN"</string>
+    <string name="np_1389845b02c0" formatted="false">"kg"</string>
+    <string name="np_147fca586077" formatted="false">"Rudern"</string>
+    <string name="np_153aa01039aa" formatted="false">"Wiederholungen"</string>
+    <string name="np_15815f5956d2" formatted="false">"KEIN ZIEL"</string>
+    <string name="np_15baed2cabe0" formatted="false">"AMRAP-VERLAUF"</string>
+    <string name="np_17246eaa3c0c" formatted="false">"02  DETAILS"</string>
+    <string name="np_17cbec673e17" formatted="false">"Keine passenden Übungen gefunden."</string>
+    <string name="np_17e45c81cc42" formatted="false">"Noch keine Bestleistung gespeichert."</string>
+    <string name="np_1807e84a263c" formatted="false">"Abduktoren"</string>
+    <string name="np_191afa7267a0" formatted="false">"WORKOUT-VORLAGE WÄHLEN"</string>
+    <string name="np_1becf5c9569f" formatted="false">"Vorlage wählen, Details prüfen und Training öffnen."</string>
+    <string name="np_1c8383eed46b" formatted="false">"Noch kein Workout erstellt"</string>
+    <string name="np_1e12875abff8" formatted="false">"ÜBUNG ERLEDIGT ✓"</string>
+    <string name="np_1ecdf65a05c3" formatted="false">"%1$s (Wochenziel · Optional)"</string>
+    <string name="np_1f89f7c7384a" formatted="false">"Gesäß"</string>
+    <string name="np_204a119419ae" formatted="false">"Workout • %1$s %2$s"</string>
+    <string name="np_209bcbdc731e" formatted="false">"Minimieren"</string>
+    <string name="np_20ec7e3ddab7" formatted="false">"A–Z"</string>
+    <string name="np_21199640e8ea" formatted="false">"Flexibles Wochenziel · %1$s× pro Woche%2$s"</string>
+    <string name="np_223dfb13b951" formatted="false">"Kleiner Gesäßmuskel"</string>
+    <string name="np_228d2ab8ff7e" formatted="false">"Laufen"</string>
+    <string name="np_22bdf47be3fd" formatted="false">"Do"</string>
+    <string name="np_237d426ca60f" formatted="false">"Gewicht (kg)"</string>
+    <string name="np_2430d35abb61" formatted="false">"Workout vorbereiten. Der AMRAP-Countdown startet erst mit STARTEN."</string>
+    <string name="np_2453a761b048" formatted="false">" · Abgeschlossen"</string>
+    <string name="np_2484cd764a80" formatted="false">"WORKOUT ANLEGEN"</string>
+    <string name="np_25c1be96314d" formatted="false">"%1$s Min. %2$s Sek."</string>
+    <string name="np_25d53566c51a" formatted="false">"+ SATZ"</string>
+    <string name="np_26c0ca793e8f" formatted="false">"So"</string>
+    <string name="np_27afe8e47ea3" formatted="false">"FORTSCHRITT HEUTE"</string>
+    <string name="np_28031dac7d54" formatted="false">"Rhomboiden"</string>
+    <string name="np_28439032958e" formatted="false">"ZEIT ABGELAUFEN · GESPEICHERT"</string>
+    <string name="np_289c8b1461e3" formatted="false">"Flexibel über die Woche hochzählen (1× bis 14×). Am Montag startet die Woche wieder bei 0."</string>
+    <string name="np_2998fd7d2d10" formatted="false">"Satz"</string>
+    <string name="np_29db02be308f" formatted="false">"ÜBERSCHRIFTEN"</string>
+    <string name="np_2a64c542f06d" formatted="false">"Keine Vorlagen vorhanden. Speichere ein Workout als Vorlage."</string>
+    <string name="np_2ae2ac311151" formatted="false">"HEUTE"</string>
+    <string name="np_2af464a2d2d7" formatted="false">"AUFGABEN &amp; WOCHENZIELE"</string>
+    <string name="np_2b0153ecca3c" formatted="false">"TRAININGSZEIT"</string>
+    <string name="np_2cc58a112d0a" formatted="false">"Klassisch"</string>
+    <string name="np_2d007b4e073f" formatted="false">"Werte eintragen"</string>
+    <string name="np_2eb32096eb64" formatted="false">"%1$s · Optional"</string>
+    <string name="np_2ee87a811816" formatted="false">" · %1$s Wiederholungen gesamt"</string>
+    <string name="np_31595b6f2970" formatted="false">"Nacken"</string>
+    <string name="np_31b7c5eb20fc" formatted="false">"VORGABEN PRO ÜBUNG"</string>
+    <string name="np_31e7a39d201a" formatted="false">"✓ Foto gewählt"</string>
+    <string name="np_32fcc564de8a" formatted="false">"MUSKELGRUPPEN AUSWÄHLEN  ›"</string>
+    <string name="np_339a27327c34" formatted="false">"Antippen zum Aufklappen · Gedrückt halten und ziehen zum Sortieren"</string>
+    <string name="np_33fe92f625e5" formatted="false">"Kalender"</string>
+    <string name="np_3448fa26997a" formatted="false">" · Vorzeitig beendet"</string>
+    <string name="np_34921ec5cba3" formatted="false">"Sätze werden ausschließlich in einem gestarteten Workout erfasst."</string>
+    <string name="np_349e9979c0db" formatted="false">"Minimalistische Punkte oder Kalender-Ansicht."</string>
+    <string name="np_34a7f3d134eb" formatted="false">"TRAININGSERGEBNIS"</string>
+    <string name="np_34d251f16f5b" formatted="false">"%1$s Runden in %2$s Min."</string>
+    <string name="np_3541f89c389b" formatted="false">"Vorlage löschen"</string>
+    <string name="np_364cc90e77c5" formatted="false">"Gastrocnemius"</string>
+    <string name="np_365b02b7539f" formatted="false">"WORKOUT PLANEN"</string>
+    <string name="np_370a3b22c813" formatted="false">"%1$s kg"</string>
+    <string name="np_370d44de0e4f" formatted="false">"NACH ART"</string>
+    <string name="np_3839958189dd" formatted="false">"Halte eine Aufgabe gedrückt, ziehe sie an die gewünschte Position und lasse los."</string>
+    <string name="np_3a26a54dc5cb" formatted="false">"Rücken"</string>
+    <string name="np_3c1c7a067895" formatted="false">"Nach Übungsart gruppieren"</string>
+    <string name="np_3c22ccd4029f" formatted="false">"AMRAP"</string>
+    <string name="np_3d05c816c2ed" formatted="false">"Mittlere Brust"</string>
+    <string name="np_3d0a383079cf" formatted="false">"Z–A"</string>
+    <string name="np_3d6849f8dec5" formatted="false">"TRAINING LÄUFT"</string>
+    <string name="np_3d943e57f928" formatted="false">"WERTUNG"</string>
+    <string name="np_3e0f7ed18a84" formatted="false">"02  CARDIO"</string>
+    <string name="np_3e286c337675" formatted="false">"Täglich"</string>
+    <string name="np_3e2b606422c8" formatted="false">"Dauer (Minuten)"</string>
+    <string name="np_3e30e6838966" formatted="false">"Übung teilen"</string>
+    <string name="np_3f85c2f7419d" formatted="false">"1 aktives Workout"</string>
+    <string name="np_40119a2c9c19" formatted="false">"%1$s Übungen · Bereite deine Reihenfolge vor"</string>
+    <string name="np_40641d40924f" formatted="false">"%1$s · %2$s vergangene Einheiten"</string>
+    <string name="np_40def82f84df" formatted="false">"SATZ SPEICHERN"</string>
+    <string name="np_40f41025e969" formatted="false">"Hauptmuskel: %1$s"</string>
+    <string name="np_418ebf21947a" formatted="false">"RÜCKBLICK-DARSTELLUNG"</string>
+    <string name="np_42a94d15d8f2" formatted="false">"+ Foto wählen"</string>
+    <string name="np_42c1112fd679" formatted="false">"NPLANNER"</string>
+    <string name="np_44424b18700e" formatted="false">"Schließen"</string>
+    <string name="np_445434ebfa2e" formatted="false">"Alle Übungsarten"</string>
+    <string name="np_446996825c07" formatted="false">"Alle %1$s · %2$s–%3$s · %4$s"</string>
+    <string name="np_449486622154" formatted="false">"Seitliche Schulter"</string>
+    <string name="np_44e89254df74" formatted="false">"Pflichtziel"</string>
+    <string name="np_454a18545075" formatted="false">"Seitliche Bauchmuskeln"</string>
+    <string name="np_45a8510351ce" formatted="false">"%1$s× pro Woche · flexibel"</string>
+    <string name="np_4711c2206922" formatted="false">"TEST-MODUS WOCHENZIELE"</string>
+    <string name="np_47dfd446bfe8" formatted="false">"TRAINING GESPEICHERT"</string>
+    <string name="np_47ed0cee9663" formatted="false">"JEDER TAG ZÄHLT."</string>
+    <string name="np_49892ed3adbb" formatted="false">"Vorlage individuell anpassen"</string>
+    <string name="np_4a79bcf07989" formatted="false">"ÜBUNGSART"</string>
+    <string name="np_4b84c437442d" formatted="false">"20 Minuten AMRAP: 5 Klimmzüge, 10 Liegestütze, 15 Kniebeugen pro Runde."</string>
+    <string name="np_4bd2f3421aa0" formatted="false">"▧  BILD-LINK"</string>
+    <string name="np_4c5118cd65ed" formatted="false">"Wählen · verwalten · löschen"</string>
+    <string name="np_4c8fecf40cb0" formatted="false">"%1$s (Optional)"</string>
+    <string name="np_4d62cf662110" formatted="false">"Vergleich je gleicher Workout-Konfiguration. Vorzeitig beendete Einheiten sind gekennzeichnet."</string>
+    <string name="np_4dfb6705cdd7" formatted="false">"Aus Workout entfernen"</string>
+    <string name="np_4e2cab7d5a3b" formatted="false">"Adduktoren"</string>
+    <string name="np_4f2a4b73489e" formatted="false">"Nackenmuskulatur"</string>
+    <string name="np_508fde77ee49" formatted="false">"Katalog kopieren"</string>
+    <string name="np_50cf95cee822" formatted="false">"Sa"</string>
+    <string name="np_51c52096e45b" formatted="false">"MUSKELGRUPPEN"</string>
+    <string name="np_51c7037a75ce" formatted="false">"VERLAUF (%1$s SÄTZE)"</string>
+    <string name="np_5253512f28de" formatted="false">"In YouTube öffnen ↗"</string>
+    <string name="np_5600339b66ff" formatted="false">"%1$s ÜBUNGEN · "</string>
+    <string name="np_578a9ee253e4" formatted="false">"Beinbeuger"</string>
+    <string name="np_57cd0aa977a8" formatted="false">"%1$s Übungen · %2$s"</string>
+    <string name="np_57fce7be21d3" formatted="false">"Kein aktives Workout"</string>
+    <string name="np_594308426372" formatted="false">"Übernehmen"</string>
+    <string name="np_595b69683dcf" formatted="false">"GESCHAFFT"</string>
+    <string name="np_5963b0f293cf" formatted="false">"VORLAGE AUSGEWÄHLT"</string>
+    <string name="np_5af65216e8d2" formatted="false">"▶  VIDEOANLEITUNG"</string>
+    <string name="np_5b0e65c12ab8" formatted="false">"Dauer (Sek.)"</string>
+    <string name="np_5b4eeaeb72a7" formatted="false">"Wird direkt in „%1$s“ eingetragen."</string>
+    <string name="np_5b769ca72f3c" formatted="false">"FERTIG"</string>
+    <string name="np_5b96f6c45c8b" formatted="false">"%1$s · Ältere Tagesaufzeichnung ohne genaue Sitzungsdauer."</string>
+    <string name="np_5c4529318bde" formatted="false">"ZIEL PRO WOCHE"</string>
+    <string name="np_5d9a1728ae58" formatted="false">"Nur diese Vorlage wird entfernt. Workouts und Trainingsdaten bleiben erhalten."</string>
+    <string name="np_5e524650a361" formatted="false">"Brachialis"</string>
+    <string name="np_5f7648103a2a" formatted="false">"Untere Brust"</string>
+    <string name="np_5fbb9f0b064b" formatted="false">"EINSTELLUNGEN"</string>
+    <string name="np_5fdacf19cdc6" formatted="false">"FÜR HEUTE FERTIG."</string>
+    <string name="np_5fed967a4959" formatted="false">"ÜBUNGEN AUSWÄHLEN"</string>
+    <string name="np_606a26e6f91d" formatted="false">"Jahresübersicht · %1$s"</string>
+    <string name="np_60adbb887847" formatted="false">"AMRAP / Runden"</string>
+    <string name="np_60d312b24709" formatted="false">"Sätze"</string>
+    <string name="np_60fe1ae1f6a6" formatted="false">"VORZEITIG BEENDET · GESPEICHERT"</string>
+    <string name="np_61457fec99c1" formatted="false">"Zählt nicht in den Perfect-Score – der Tag gilt auch ohne diese Aufgabe als perfekt."</string>
+    <string name="np_6202f94efd35" formatted="false">"An KI-App senden"</string>
+    <string name="np_6354d998d12d" formatted="false">"DEIN RHYTHMUS."</string>
+    <string name="np_649df08a448e" formatted="false">"English"</string>
+    <string name="np_64ec5188afbe" formatted="false">"Unterer Rücken"</string>
+    <string name="np_64f3a806cb11" formatted="false">"Schultern"</string>
+    <string name="np_6571c3a07212" formatted="false">"Gerader Bauchmuskel"</string>
+    <string name="np_67c4677dcedc" formatted="false">"Satz %1$s"</string>
+    <string name="np_694aa76eb977" formatted="false">"+ Neu"</string>
+    <string name="np_696c877954da" formatted="false">"Ziel-Wiederholungen"</string>
+    <string name="np_69830ab7e0a9" formatted="false">"VOLLSTÄNDIGE RUNDEN"</string>
+    <string name="np_69a89741235d" formatted="false">"NPLANNER · VERSION 0.43"</string>
+    <string name="np_6a1cae58339e" formatted="false">"Rekorde"</string>
+    <string name="np_6a2fce0e54c0" formatted="false">"Keine passende Video-App gefunden."</string>
+    <string name="np_6a559f764035" formatted="false">"Ganzkörper"</string>
+    <string name="np_6a8982ba88d0" formatted="false">"%1$s Wdh."</string>
+    <string name="np_6ac07aa166b6" formatted="false">"Cindy"</string>
+    <string name="np_6aed3e27e961" formatted="false">"Zeitlimit (Minuten)"</string>
+    <string name="np_6b3a650f4661" formatted="false">"Video wird in einer externen App geöffnet."</string>
+    <string name="np_6b7439b40105" formatted="false">"Mi"</string>
+    <string name="np_6b75f65ab453" formatted="false">"▶  YOUTUBE-VIDEO"</string>
+    <string name="np_6c03c59685ba" formatted="false">"Intervall"</string>
+    <string name="np_6c4a58f36192" formatted="false">"Workout bearbeiten"</string>
+    <string name="np_6c98dc0541eb" formatted="false">"Waden"</string>
+    <string name="np_6d4ea26db3e6" formatted="false">"NEUES WORKOUT"</string>
+    <string name="np_6dc754e2bb60" formatted="false">"Zeit (Sekunden)"</string>
+    <string name="np_6de0493b8149" formatted="false">"Tiefe Bauchmuskulatur"</string>
+    <string name="np_6e1b76036d3e" formatted="false">"SATZ EINTRAGEN"</string>
+    <string name="np_6ecaaff87dea" formatted="false">"Übungsbild"</string>
+    <string name="np_6f7a59eef1d7" formatted="false">"Tippen, um Übungen hinzuzufügen"</string>
+    <string name="np_709bae28f41d" formatted="false">"Aktiv: Wochenziele lassen sich beliebig oft am selben Tag hoch- und runterzählen."</string>
+    <string name="np_70b73bbc118d" formatted="false">"Speichern"</string>
+    <string name="np_71482b1a8014" formatted="false">"Füge deine erste Übung hinzu. Die Reihenfolge kannst du jederzeit durch Ziehen ändern."</string>
+    <string name="np_71f43d0f0475" formatted="false">"ERLEDIGT"</string>
+    <string name="np_72062a54a368" formatted="false">"Pflichtaufgaben warten"</string>
+    <string name="np_7238de321955" formatted="false">"VERGANGENE WORKOUTS"</string>
+    <string name="np_7295825fe629" formatted="false">"Als Vorlage speichern"</string>
+    <string name="np_733e0e2f101e" formatted="false">"Wdh. (1 = Halten)"</string>
+    <string name="np_7396ed26d384" formatted="false">"Vorlage übernehmen und Workout vorbereiten. Das Training startet anschließend manuell."</string>
+    <string name="np_73a8664f0b43" formatted="false">"Noch keine AMRAP-Bestleistung gespeichert."</string>
+    <string name="np_73e9acc95f81" formatted="false">"%1$s · Gewicht · Ziel %2$s × %3$s"</string>
+    <string name="np_748297d0d36e" formatted="false">" Importierte Übungen landen direkt in „%1$s“."</string>
+    <string name="np_74ba7ad179b9" formatted="false">"Ungültiges JSON-Format."</string>
+    <string name="np_75993db09725" formatted="false">"Hauptmuskel"</string>
+    <string name="np_761fc34088c6" formatted="false">"Abgeschlossene Workouts erscheinen hier."</string>
+    <string name="np_7662a4352ac6" formatted="false">"Ziel-Gewicht (kg)"</string>
+    <string name="np_7704a2ed7811" formatted="false">"%1$s Runden"</string>
+    <string name="np_77400e4f0ec5" formatted="false">"Ausführungsschritte · eine Zeile pro Schritt"</string>
+    <string name="np_77c51fce099a" formatted="false">" kg"</string>
+    <string name="np_78b296080ae2" formatted="false">"Name der Übung"</string>
+    <string name="np_78ba515b2614" formatted="false">"Kreis"</string>
+    <string name="np_78c2350a7dac" formatted="false">"Alle Vorlagen lassen sich verwenden, bearbeiten oder löschen."</string>
+    <string name="np_78db94f73df9" formatted="false">"TRAINING"</string>
+    <string name="np_7a61498caf47" formatted="false">"Selbst zusammenstellen"</string>
+    <string name="np_7a82603f955e" formatted="false">"%1$s · AMRAP · %2$s Min. · %3$s Runden"</string>
+    <string name="np_7a9f1f7e8ce8" formatted="false">"KI-Prompt erstellen  ↗"</string>
+    <string name="np_7b614cb2eba5" formatted="false">"Vordere Schulter"</string>
+    <string name="np_7c3df2c5fe25" formatted="false">"Donnerstag"</string>
+    <string name="np_7d4a3f2aaafe" formatted="false">"Importieren"</string>
+    <string name="np_7ddced18c41c" formatted="false">"01  VORLAGE"</string>
+    <string name="np_7e022f02cec6" formatted="false">"VORLAGEN"</string>
+    <string name="np_7e719873d064" formatted="false">"%1$s × %2$s Wdh."</string>
+    <string name="np_7f854c57c3cb" formatted="false">"%1$s Sek."</string>
+    <string name="np_7fb362e8d0bf" formatted="false">"Bitte einen gültigen HTTPS-Link eingeben."</string>
+    <string name="np_81648b7f9994" formatted="false">"%1$s Wdh. in %2$s Sek."</string>
+    <string name="np_81a729ac41c5" formatted="false">"✓ Video gewählt"</string>
+    <string name="np_82d36c5ed290" formatted="false">" · ältere Tagesaufzeichnung"</string>
+    <string name="np_82ef343eef67" formatted="false">"ÜBUNGSTYP"</string>
+    <string name="np_831b6a6e215c" formatted="false">"Workout-Vorlage"</string>
+    <string name="np_834bc9df07a7" formatted="false">"Menüs und Beschriftungen wechseln sofort. Eigene Inhalte bleiben unverändert."</string>
+    <string name="np_84415f0defd3" formatted="false">"01  KRAFTTRAINING"</string>
+    <string name="np_846460c3195a" formatted="false">"Anlegen"</string>
+    <string name="np_850b0e521c71" formatted="false">"Diese ältere Tagesaufzeichnung und alle zugehörigen Sätze dieses Workouts an diesem Tag werden gelöscht. Rekorde werden neu berechnet. Vorlagen bleiben erhalten."</string>
+    <string name="np_8590499d2618" formatted="false">"Verwenden"</string>
+    <string name="np_85a30e7cb28e" formatted="false">"+ Video wählen"</string>
+    <string name="np_85ad5644425c" formatted="false">"Samstag"</string>
+    <string name="np_85b7821c3553" formatted="false">"%1$s Sätze  ›"</string>
+    <string name="np_86d19c0a8ded" formatted="false">"Weitere: %1$s"</string>
+    <string name="np_8752f1c63e6e" formatted="false">"Wdh."</string>
+    <string name="np_8917bbe624ec" formatted="false">"ALLE ARTEN"</string>
+    <string name="np_893106ea23f8" formatted="false">"WORKOUT-ART"</string>
+    <string name="np_8ab99e35cd2b" formatted="false">"Zeit / Intervall"</string>
+    <string name="np_8ad305b002c2" formatted="false">"%1$s %2$s noch auf dich."</string>
+    <string name="np_8bb0f19f592e" formatted="false">"Montag"</string>
+    <string name="np_8c899c98f3bc" formatted="false">"Quadrizeps"</string>
+    <string name="np_8d255d3f1bd7" formatted="false">"MIT KI ANLEGEN"</string>
+    <string name="np_8e4bdae0da46" formatted="false">"„Bis“ muss nach „Von“ liegen."</string>
+    <string name="np_8e6c596cbe42" formatted="false">"Name absteigend (Z–A)"</string>
+    <string name="np_8f075c7e5cba" formatted="false">"OFFEN"</string>
+    <string name="np_8f60a5524b26" formatted="false">"Radfahren"</string>
+    <string name="np_8f9f75816344" formatted="false">"Distanz (km)"</string>
+    <string name="np_9028b65aa0a5" formatted="false">"ENTWICKLER &amp; TEST"</string>
+    <string name="np_9077e281aaf0" formatted="false">"Hintere Schulter"</string>
+    <string name="np_907d342d4ac0" formatted="false">"%.1f kg"</string>
+    <string name="np_90d2782a0b9e" formatted="false">"AMRAP · LIVE"</string>
+    <string name="np_912b94c66246" formatted="false">"%1$s Übungen · %2$s Sätze in dieser Einheit"</string>
+    <string name="np_91e885d8e5af" formatted="false">"Mo"</string>
+    <string name="np_92859f8d2db5" formatted="false">"Datei konnte nicht gelesen werden."</string>
+    <string name="np_950c2621787f" formatted="false">"WOCHENTAGE"</string>
+    <string name="np_956a6e5ab6c7" formatted="false">"Jahr"</string>
+    <string name="np_9587a83db38f" formatted="false">"%1$s Zeitpunkte am Tag"</string>
+    <string name="np_96c878b2e330" formatted="false">"%1$s Std. %2$s Min."</string>
+    <string name="np_96fc72d1a322" formatted="false">"Übung mithilfe KI anlegen"</string>
+    <string name="np_97043bacc3aa" formatted="false">"HEUTE · %1$s"</string>
+    <string name="np_9886f3aa23b9" formatted="false">"Als Nächstes um %1$s · %2$s"</string>
+    <string name="np_98ed891e604b" formatted="false">"ÜBUNG HINZUFÜGEN"</string>
+    <string name="np_992b25cdc80c" formatted="false">"Für lokale Videos bitte einen HTTPS-Link hinterlegen."</string>
+    <string name="np_99946c19db88" formatted="false">"PAUSIERT / BEREIT"</string>
+    <string name="np_999f6f355090" formatted="false">"Latissimus"</string>
+    <string name="np_9bf3182032ce" formatted="false">"WORKOUTS VORBEREITEN"</string>
+    <string name="np_9d1181d822cc" formatted="false">"Weitere Muskeln"</string>
+    <string name="np_9df6718de96c" formatted="false">"Endgültig löschen"</string>
+    <string name="np_9e8be764359c" formatted="false">"AUSFÜHRUNG"</string>
+    <string name="np_9efdcfb98021" formatted="false">"+ ÜBUNG"</string>
+    <string name="np_9f521292df82" formatted="false">"+ WORKOUT ANLEGEN"</string>
+    <string name="np_9ff8f89a6660" formatted="false">"Optional (Bonus)"</string>
+    <string name="np_a001ef56f69c" formatted="false">"ÜBUNGEN"</string>
+    <string name="np_a0b60ec855e9" formatted="false">"Bezeichnung"</string>
+    <string name="np_a26b53ae58e2" formatted="false">"Externer Medienlink (HTTPS)"</string>
+    <string name="np_a31fbb1a8dfd" formatted="false">"%1$s Wiederholungen"</string>
+    <string name="np_a4565af537e2" formatted="false">"Zurücksetzen"</string>
+    <string name="np_a4b078f9eb7b" formatted="false">"Von"</string>
+    <string name="np_a5f223348642" formatted="false">"Externes Übungsbild"</string>
+    <string name="np_a6a7709266d3" formatted="false">"Deutsch"</string>
+    <string name="np_a8ed8ebb903d" formatted="false">"For Time"</string>
+    <string name="np_a9695d3efead" formatted="false">"Export fehlgeschlagen."</string>
+    <string name="np_a9f2c6673cc5" formatted="false">" · %1$s km"</string>
+    <string name="np_aa4654cc6edd" formatted="false">"ALLE PFLICHTZIELE ERREICHT"</string>
+    <string name="np_aa77f314fab0" formatted="false">"Fr"</string>
+    <string name="np_aa7a64a2aec3" formatted="false">"+ %1$s Übungen der nächsten Runde"</string>
+    <string name="np_aac71de4cd34" formatted="false">"%1$s vollständige Runden"</string>
+    <string name="np_aafe07526e35" formatted="false">"Sonstiges"</string>
+    <string name="np_abfe09c3932d" formatted="false">"ART"</string>
+    <string name="np_ac8804f7ada4" formatted="false">"Mittlerer Gesäßmuskel"</string>
+    <string name="np_acece0d2784d" formatted="false">"WIEDERHOLUNGEN"</string>
+    <string name="np_adf9b9b52535" formatted="false">"Noch keine Aufgaben oder Wochenziele angelegt. Tippe oben auf „+ NEU“."</string>
+    <string name="np_ae3c9b5e31db" formatted="false">"Video / YouTube"</string>
+    <string name="np_af011b0785ed" formatted="false">"Ziel-Wdh."</string>
+    <string name="np_af51affdaed8" formatted="false">"Notiz / Fokus"</string>
+    <string name="np_af9f8f9cf25b" formatted="false">"ÜBUNGSBIBLIOTHEK"</string>
+    <string name="np_afafcf8171c4" formatted="false">"+ Übung hinzufügen"</string>
+    <string name="np_afb51020f59b" formatted="false">"%1$s · Cardio · Ziel %2$s Min."</string>
+    <string name="np_afbb7532e92a" formatted="false">"Keine Sätze erfasst."</string>
+    <string name="np_b0bae95080a9" formatted="false">"DEINE REGELN."</string>
+    <string name="np_b13ccfe84c88" formatted="false">"Video öffnen ↗"</string>
+    <string name="np_b15d10e09c4f" formatted="false">"WORKOUT BEARBEITEN"</string>
+    <string name="np_b28f6f150a0f" formatted="false">"SPRACHE"</string>
+    <string name="np_b2ce6b5d7cb1" formatted="false">"Dienstag"</string>
+    <string name="np_b3acd2792395" formatted="false">"UHRZEIT"</string>
+    <string name="np_b3dc4bdd3e5b" formatted="false">"Muss erledigt sein, damit der Tag als perfekt (rot) gewertet wird."</string>
+    <string name="np_b4984e6f8d38" formatted="false">"Trizeps"</string>
+    <string name="np_b5e5727b7dfd" formatted="false">".json Datei"</string>
+    <string name="np_b68b2c65027e" formatted="false">"Obere Brust"</string>
+    <string name="np_b6dafaa1c8b5" formatted="false">"Punkte"</string>
+    <string name="np_b730f7bffbc0" formatted="false">"Kein Ziel"</string>
+    <string name="np_b7a874a0db72" formatted="false">"Zeit (Sek.)"</string>
+    <string name="np_b80121b7ef4f" formatted="false">"Gewicht"</string>
+    <string name="np_b8331e795763" formatted="false">"DARSTELLUNG"</string>
+    <string name="np_b86312ffdb86" formatted="false">"Einmal planen. Im Alltag nur erledigen."</string>
+    <string name="np_b8f128a679b7" formatted="false">"ALLE"</string>
+    <string name="np_b92618692b10" formatted="false">"Beine"</string>
+    <string name="np_bb7394e2373e" formatted="false">"FARBMODUS"</string>
+    <string name="np_bbfb23b841a2" formatted="false">"Bitte zuerst das laufende Workout beenden."</string>
+    <string name="np_bc6f103c2f20" formatted="false">"Gestartet um "</string>
+    <string name="np_bc96c191b7dd" formatted="false">"Pflichtaufgabe wartet"</string>
+    <string name="np_bca3386909f2" formatted="false">"TRAINING STARTEN"</string>
+    <string name="np_bcff9160c016" formatted="false">"Gehen"</string>
+    <string name="np_bd0ffd87acdf" formatted="false">"Übungen"</string>
+    <string name="np_bd5f97b68e6d" formatted="false">"%1$s pro Runde"</string>
+    <string name="np_bd648e366f1c" formatted="false">"Vorlage bearbeiten"</string>
+    <string name="np_bf7fe08cc83d" formatted="false">"03  ÜBUNGEN"</string>
+    <string name="np_bf810ccd740c" formatted="false">"Änderungen werden gespeichert."</string>
+    <string name="np_c042750d784a" formatted="false">"Runden"</string>
+    <string name="np_c05fabc0e5af" formatted="false">"SPEICHERN"</string>
+    <string name="np_c0c0bc392194" formatted="false">"Unterarme"</string>
+    <string name="np_c0ddbd78adad" formatted="false">"Muskelgruppe suchen"</string>
+    <string name="np_c14c5be3b07e" formatted="false">"%1$s perfekt · %2$s aktiv"</string>
+    <string name="np_c1c8487f611d" formatted="false">"CINDY-VORLAGE (20 MIN.)"</string>
+    <string name="np_c235598fe990" formatted="false">"Diese Trainingseinheit und ihre Sätze werden gelöscht. Rekorde werden neu berechnet. Workouts und Vorlagen bleiben erhalten."</string>
+    <string name="np_c2c726a4f959" formatted="false">"2 Std."</string>
+    <string name="np_c2cce2114451" formatted="false">"Bauch &amp; Core"</string>
+    <string name="np_c44923907ba8" formatted="false">"%1$s/%2$s Übungen übernommen."</string>
+    <string name="np_c45203d53584" formatted="false">"Wiederholungen (Körpergewicht)"</string>
+    <string name="np_c4d6f0b64fd9" formatted="false">"%1$s · Körpergewicht · Ziel %2$s Wdh."</string>
+    <string name="np_c5aa0094e224" formatted="false">"BESCHREIBUNG &amp; HINWEISE"</string>
+    <string name="np_c60937ec6f6d" formatted="false">"Zuletzt: %1$s"</string>
+    <string name="np_c614ba7c453c" formatted="false">"Auto"</string>
+    <string name="np_c6cc1e126c5e" formatted="false">"Trapezmuskel"</string>
+    <string name="np_c710983cc05f" formatted="false">"FÜR HEUTE GEPLANT"</string>
+    <string name="np_c7618bdb3fde" formatted="false">"30 Min."</string>
+    <string name="np_c80854a748cc" formatted="false">"Vergangenes AMRAP löschen"</string>
+    <string name="np_c843c5c939d0" formatted="false">"TRAINING BEENDEN"</string>
+    <string name="np_c918198212cb" formatted="false">"Katalog als JSON kopiert"</string>
+    <string name="np_ca4712174561" formatted="false">"Dauer in Sekunden"</string>
+    <string name="np_ccb58b229959" formatted="false">"Workouts"</string>
+    <string name="np_cd3f33f4efd7" formatted="false">"RÜCKBLICK"</string>
+    <string name="np_cdeb4e508090" formatted="false">"Bizeps"</string>
+    <string name="np_ce23a78c5616" formatted="false">"%02d:%02d"</string>
+    <string name="np_ce9e650ed816" formatted="false">"Beenden"</string>
+    <string name="np_cfe7d95c9056" formatted="false">"%1$s · Zeit · Ziel %2$s Sek."</string>
+    <string name="np_d0e1ef5286dc" formatted="false">"Dein Tag ist abgeschlossen."</string>
+    <string name="np_d1493a657eaf" formatted="false">"%1$s · Zeit · Ziel %2$s Wdh. in %3$s Sek."</string>
+    <string name="np_d2ae184f0aa5" formatted="false">"FORTSETZEN"</string>
+    <string name="np_d2b34dbcb52e" formatted="false">"Soleus"</string>
+    <string name="np_d2c05164a3b3" formatted="false">"▶  VIDEO-LINK"</string>
+    <string name="np_d30ed0e05d1b" formatted="false">"WORKOUTS &amp; PROGRESSION."</string>
+    <string name="np_d34f8dd0e537" formatted="false">"Zeit"</string>
+    <string name="np_d3a004e65a59" formatted="false">"1 Std."</string>
+    <string name="np_d3a0c92f97e5" formatted="false">"ÖFFNEN ›"</string>
+    <string name="np_d42485349869" formatted="false">"Bild"</string>
+    <string name="np_d54e3800f52b" formatted="false">"ÜBUNG LÖSCHEN?"</string>
+    <string name="np_d56d73957fc5" formatted="false">"Wochenziel"</string>
+    <string name="np_d5e5956e6aa4" formatted="false">"MEDIEN / LINKS"</string>
+    <string name="np_d70301ab9f7e" formatted="false">"DAUER"</string>
+    <string name="np_d70a08bcf3ec" formatted="false">"Zielrunden"</string>
+    <string name="np_d7db063433ba" formatted="false">"Arme"</string>
+    <string name="np_d8331d85aac4" formatted="false">"CARDIO-ART"</string>
+    <string name="np_d8650daa10f4" formatted="false">"Übungen durchsuchen"</string>
+    <string name="np_d989fa52d71e" formatted="false">"JSON-Antwort hier einfügen"</string>
+    <string name="np_d9da98f8078e" formatted="false">"Wochenziel erreicht (%1$s×/Woche)%2$s"</string>
+    <string name="np_da13625eeb37" formatted="false">"Monat"</string>
+    <string name="np_dadafe9ea717" formatted="false">"SÄTZE GESAMT"</string>
+    <string name="np_db4262bdee36" formatted="false">"N-Dot"</string>
+    <string name="np_dba8c7f0f351" formatted="false">"PERFEKT"</string>
+    <string name="np_dc1478111cc6" formatted="false">"Training fortsetzen"</string>
+    <string name="np_dd9d4ca852da" formatted="false">"%1$s Wdh. · %2$ss"</string>
+    <string name="np_de210adba382" formatted="false">"Schwimmen"</string>
+    <string name="np_de51b771f43d" formatted="false">"+ Notiz hinzufügen"</string>
+    <string name="np_df8af55eabbf" formatted="false">"Das Workout wird angelegt und anschließend geöffnet."</string>
+    <string name="np_dfd8aad6150a" formatted="false">"Beim ersten Start wird die Systemeinstellung übernommen. Auto folgt späteren Änderungen."</string>
+    <string name="np_e00b9ebf7918" formatted="false">"TRAINING LÖSCHEN?"</string>
+    <string name="np_e0ad4c95450e" formatted="false">"Vergangenes Workout löschen"</string>
+    <string name="np_e1e41fb2b17a" formatted="false">"FOTO ODER VIDEO"</string>
+    <string name="np_e33efa2b3499" formatted="false">"Training pausieren"</string>
+    <string name="np_e3417b4e7753" formatted="false">"ÜBUNG BEARBEITEN"</string>
+    <string name="np_e35fa12ca640" formatted="false">"Anzeige auf dem Heute-Bildschirm."</string>
+    <string name="np_e36d2e63597b" formatted="false">"%1$s Std."</string>
+    <string name="np_e4e95c845760" formatted="false">"Test-Modus aktiv · %1$s× pro Woche%2$s"</string>
+    <string name="np_e51bd6be1fe7" formatted="false">"Balken"</string>
+    <string name="np_e5721c734beb" formatted="false">"Ganztägig"</string>
+    <string name="np_e643fc8f64d5" formatted="false">"Übungsinformationen"</string>
+    <string name="np_e7e229c1b0d1" formatted="false">"STARTEN"</string>
+    <string name="np_e88f262429f9" formatted="false">"%1$s kg × %2$s Wdh."</string>
+    <string name="np_ea3552526134" formatted="false">"Mittwoch"</string>
+    <string name="np_eafdd7e6d735" formatted="false">"Vorlage gespeichert"</string>
+    <string name="np_eb013efc32e2" formatted="false">"Cardio"</string>
+    <string name="np_eb3f070bc197" formatted="false">"REKORDE"</string>
+    <string name="np_eb94cc90f3be" formatted="false">"%1$s. Übung · %2$s"</string>
+    <string name="np_ec4616f89869" formatted="false">"Dunkel"</string>
+    <string name="np_ed10fe113de1" formatted="false">"Hell"</string>
+    <string name="np_ed3994287ff4" formatted="false">"Normaler Text bleibt in der Systemschrift."</string>
+    <string name="np_edc5934c34a6" formatted="false">"FILTER"</string>
+    <string name="np_ee22333397e5" formatted="false">"Format: %1$s · Sende die Vorlage an Gemini, ChatGPT oder Claude und füge die JSON-Antwort hier ein."</string>
+    <string name="np_ee3a19e84698" formatted="false">"Klassische Workouts erscheinen hier. AMRAP-Ergebnisse findest du im AMRAP-Verlauf."</string>
+    <string name="np_eec4b9363f9f" formatted="false">"WORKOUT LÖSCHEN?"</string>
+    <string name="np_eef51c581083" formatted="false">"Alle Pflichtziele erreicht. Der Rest des Tages gehört dir."</string>
+    <string name="np_f16dba575b22" formatted="false">"OPTIONAL · ZÄHLT NICHT ZUM TAGESSCORE"</string>
+    <string name="np_f1a3cf2f741b" formatted="false">" (Optional)"</string>
+    <string name="np_f330ec3da298" formatted="false">"KI-ÜBUNG IMPORT"</string>
+    <string name="np_f3434075835f" formatted="false">"Als Datei exportieren"</string>
+    <string name="np_f50a8a12533c" formatted="false">" km"</string>
+    <string name="np_f6de9f58f3d0" formatted="false">"Die Übung wird aus deiner Bibliothek entfernt. Möchtest du fortfahren?"</string>
+    <string name="np_f6fd5dfdcbd9" formatted="false">"Das Workout wird entfernt. Gespeicherte Trainingssätze bleiben erhalten."</string>
+    <string name="np_f711c4662ae4" formatted="false">"Als Vorlage speichern"</string>
+    <string name="np_f75cff63870c" formatted="false">"Körpergewicht"</string>
+    <string name="np_f77edaf1cc27" formatted="false">"Alle Pflichtziele"</string>
+    <string name="np_f7a984b986e2" formatted="false">"LÄUFT"</string>
+    <string name="np_f7fb4627b990" formatted="false">" · Optional"</string>
+    <string name="np_f8777d668985" formatted="false">"Einzelsätze ausblenden ⌃"</string>
+    <string name="np_f8e9c756eaa2" formatted="false">"Sonntag"</string>
+    <string name="np_fae16c3927d1" formatted="false">"TEILWEISE"</string>
+    <string name="np_fba7bf471cf9" formatted="false">"Ohne Trainingsverlauf, separat wiederverwendbar."</string>
+    <string name="np_fca4530c0eb9" formatted="false">"03  AMRAP"</string>
+    <string name="np_fe564f789dc6" formatted="false">"Di"</string>
+    <string name="np_ffa5a8a7e21d" formatted="false">"Löschen"</string>
+    <string name="np_ffb4fb4a1c5c" formatted="false">"Einzelsätze anzeigen ⌄"</string>
+</resources>
