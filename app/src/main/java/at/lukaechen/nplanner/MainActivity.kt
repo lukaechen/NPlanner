@@ -3796,7 +3796,6 @@ private fun AmrapSummaryDialog(result: JSONObject, ndot: FontFamily, onDelete: (
                         modifier = Modifier.semantics { contentDescription = "Vergangenes AMRAP löschen" }) {
                         WorkoutActionIcon(WorkoutAction.DELETE, Red)
                     }
-                    TextButton(onClick = onClose) { Text("✕", color = White) }
                 }
                 DisplayTitle(result.optString("name").uppercase(Locale.GERMAN), ndot, fontSize = 26.sp)
                 Text(if (completed) "ZEIT ABGELAUFEN · GESPEICHERT" else "VORZEITIG BEENDET · GESPEICHERT",
@@ -4583,7 +4582,6 @@ private fun WorkoutTemplateManager(
     onRename: (String, String) -> Unit,
     onDelete: (String) -> Unit
 ) {
-    var tab by remember { mutableIntStateOf(if (templates.isNotEmpty()) 0 else 1) }
     var editingKey by remember { mutableStateOf<String?>(null) }
     var editedName by remember { mutableStateOf("") }
     var deleteKey by remember { mutableStateOf<String?>(null) }
@@ -4594,14 +4592,11 @@ private fun WorkoutTemplateManager(
                 Text("WÄHLEN & VERWALTEN", color = Red, fontSize = 10.sp)
                 DisplayTitle("VORLAGEN", ndot, fontSize = 28.sp)
                 Spacer(Modifier.height(12.dp))
-                Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                    ChoiceChip("Meine (${templates.size})", tab == 0, Modifier.weight(1f)) { tab = 0 }
-                    ChoiceChip("Standard (${workoutPresets.size})", tab == 1, Modifier.weight(1f)) { tab = 1 }
-                }
-                Spacer(Modifier.height(12.dp))
+                Text("EIGENE & STANDARDVORLAGEN", color = Muted, fontSize = 10.sp,
+                    modifier = Modifier.padding(top = 8.dp, bottom = 12.dp))
                 Column(Modifier.weight(1f).fillMaxWidth().verticalScroll(rememberScrollState()),
                     verticalArrangement = Arrangement.spacedBy(10.dp)) {
-                    if (tab == 0) {
+                    SectionLabel("MEINE VORLAGEN", topPadding = 4.dp, bottomPadding = 6.dp)
                         if (templates.isEmpty()) {
                             Surface(color = Panel2, shape = RoundedCornerShape(18.dp)) {
                                 Text("Noch keine eigenen Vorlagen. Speichere ein vorbereitetes Workout über das Lesezeichen-Symbol als Vorlage.",
@@ -4645,8 +4640,7 @@ private fun WorkoutTemplateManager(
                                 }
                             }
                         }
-                    } else {
-                        Text("Mitgelieferte Vorlagen bleiben verfügbar. Eigene Vorlagen kannst du unter Meine löschen.", color = Muted, fontSize = 11.sp)
+                    SectionLabel("STANDARDVORLAGEN", topPadding = 16.dp, bottomPadding = 6.dp)
                         workoutPresets.forEach { preset ->
                             Surface(color = Panel2, shape = RoundedCornerShape(20.dp), modifier = Modifier.fillMaxWidth()) {
                                 Column(Modifier.padding(14.dp)) {
@@ -4661,7 +4655,6 @@ private fun WorkoutTemplateManager(
                                 }
                             }
                         }
-                    }
                 }
                 TextButton(onClick = onDismiss, modifier = Modifier.align(Alignment.CenterHorizontally)) { Text("Schließen", color = White) }
             }
@@ -6213,55 +6206,6 @@ private fun SetupScreen(
     }
 
     Screen(ndot, "DEINE REGELN.", "EINSTELLUNGEN", "Einmal planen. Im Alltag nur erledigen.") {
-        SectionLabel("DARSTELLUNG")
-        Surface(color = Panel, shape = RoundedCornerShape(22.dp), modifier = Modifier.fillMaxWidth()) {
-            Column(Modifier.padding(16.dp)) {
-                Text("ÜBERSCHRIFTEN", fontSize = 16.sp, color = White, fontWeight = FontWeight.Medium)
-                Text("Normaler Text bleibt in der Systemschrift.", fontSize = 11.sp, color = Muted)
-                Spacer(Modifier.height(12.dp))
-                Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                    listOf(false to "Klassisch", true to "N-Dot").forEach { (dot, label) ->
-                        Surface(
-                            modifier = Modifier.weight(1f).clickable { onHeadingStyleChange(dot) },
-                            color = if (useDotHeadings == dot) White else Panel2,
-                            shape = RoundedCornerShape(16.dp)
-                        ) {
-                            Text(
-                                text = (if (useDotHeadings == dot) "✓  " else "") + label,
-                                color = if (useDotHeadings == dot) Bg else White,
-                                fontSize = 13.sp,
-                                modifier = Modifier.padding(vertical = 12.dp, horizontal = 10.dp)
-                            )
-                        }
-                    }
-                }
-                Spacer(Modifier.height(10.dp))
-                DisplayTitle("NPLANNER", ndot, fontSize = 25.sp)
-            }
-        }
-        Surface(color = Panel, shape = RoundedCornerShape(22.dp), modifier = Modifier.fillMaxWidth().padding(top = 10.dp)) {
-            Column(Modifier.padding(16.dp)) {
-                Text("FORTSCHRITT HEUTE", fontSize = 16.sp, color = White, fontWeight = FontWeight.Medium)
-                Text("Anzeige auf dem Heute-Bildschirm.", fontSize = 11.sp, color = Muted)
-                Spacer(Modifier.height(12.dp))
-                Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
-                    ProgressStyleTile("Balken", !orbit, Modifier.weight(1f), { onProgressStyleChange(false) }) { fg, track -> MiniBars(fg, track) }
-                    ProgressStyleTile("Kreis", orbit, Modifier.weight(1f), { onProgressStyleChange(true) }) { fg, track -> MiniRing(fg, track) }
-                }
-            }
-        }
-        Surface(color = Panel, shape = RoundedCornerShape(22.dp), modifier = Modifier.fillMaxWidth().padding(top = 10.dp)) {
-            Column(Modifier.padding(16.dp)) {
-                Text("RÜCKBLICK-DARSTELLUNG", fontSize = 16.sp, color = White, fontWeight = FontWeight.Medium)
-                Text("Minimalistische Punkte oder Kalender-Ansicht.", fontSize = 11.sp, color = Muted)
-                Spacer(Modifier.height(12.dp))
-                Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
-                    ProgressStyleTile("Punkte", historyDots, Modifier.weight(1f), { onHistoryStyleChange(true) }) { fg, track -> MiniHistoryDots(fg, track) }
-                    ProgressStyleTile("Kalender", !historyDots, Modifier.weight(1f), { onHistoryStyleChange(false) }) { fg, track -> MiniHistoryCalendar(fg, track) }
-                }
-            }
-        }
-
         Row(
             Modifier.fillMaxWidth().padding(top = 26.dp, bottom = 4.dp),
             verticalAlignment = Alignment.CenterVertically,
@@ -6368,7 +6312,57 @@ private fun SetupScreen(
             }
         }
 
-        SectionLabel("ENTWICKLER & TEST")
+        Spacer(Modifier.height(16.dp))
+        SectionLabel("DARSTELLUNG")
+        Surface(color = Panel, shape = RoundedCornerShape(22.dp), modifier = Modifier.fillMaxWidth()) {
+            Column(Modifier.padding(16.dp)) {
+                Text("ÜBERSCHRIFTEN", fontSize = 16.sp, color = White, fontWeight = FontWeight.Medium)
+                Text("Normaler Text bleibt in der Systemschrift.", fontSize = 11.sp, color = Muted)
+                Spacer(Modifier.height(12.dp))
+                Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                    listOf(false to "Klassisch", true to "N-Dot").forEach { (dot, label) ->
+                        Surface(
+                            modifier = Modifier.weight(1f).clickable { onHeadingStyleChange(dot) },
+                            color = if (useDotHeadings == dot) White else Panel2,
+                            shape = RoundedCornerShape(16.dp)
+                        ) {
+                            Text(
+                                text = (if (useDotHeadings == dot) "✓  " else "") + label,
+                                color = if (useDotHeadings == dot) Bg else White,
+                                fontSize = 13.sp,
+                                modifier = Modifier.padding(vertical = 12.dp, horizontal = 10.dp)
+                            )
+                        }
+                    }
+                }
+                Spacer(Modifier.height(10.dp))
+                DisplayTitle("NPLANNER", ndot, fontSize = 25.sp)
+            }
+        }
+        Surface(color = Panel, shape = RoundedCornerShape(22.dp), modifier = Modifier.fillMaxWidth().padding(top = 10.dp)) {
+            Column(Modifier.padding(16.dp)) {
+                Text("FORTSCHRITT HEUTE", fontSize = 16.sp, color = White, fontWeight = FontWeight.Medium)
+                Text("Anzeige auf dem Heute-Bildschirm.", fontSize = 11.sp, color = Muted)
+                Spacer(Modifier.height(12.dp))
+                Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+                    ProgressStyleTile("Balken", !orbit, Modifier.weight(1f), { onProgressStyleChange(false) }) { fg, track -> MiniBars(fg, track) }
+                    ProgressStyleTile("Kreis", orbit, Modifier.weight(1f), { onProgressStyleChange(true) }) { fg, track -> MiniRing(fg, track) }
+                }
+            }
+        }
+        Surface(color = Panel, shape = RoundedCornerShape(22.dp), modifier = Modifier.fillMaxWidth().padding(top = 10.dp)) {
+            Column(Modifier.padding(16.dp)) {
+                Text("RÜCKBLICK-DARSTELLUNG", fontSize = 16.sp, color = White, fontWeight = FontWeight.Medium)
+                Text("Minimalistische Punkte oder Kalender-Ansicht.", fontSize = 11.sp, color = Muted)
+                Spacer(Modifier.height(12.dp))
+                Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+                    ProgressStyleTile("Punkte", historyDots, Modifier.weight(1f), { onHistoryStyleChange(true) }) { fg, track -> MiniHistoryDots(fg, track) }
+                    ProgressStyleTile("Kalender", !historyDots, Modifier.weight(1f), { onHistoryStyleChange(false) }) { fg, track -> MiniHistoryCalendar(fg, track) }
+                }
+            }
+        }
+
+        SectionLabel("ENTWICKLER & TEST", topPadding = 22.dp, bottomPadding = 10.dp)
         Surface(
             color = Panel,
             shape = RoundedCornerShape(22.dp),
@@ -6411,7 +6405,7 @@ private fun SetupScreen(
         )
         HorizontalDivider(color = Color(0xFF242424), modifier = Modifier.padding(top = 6.dp))
         Text(
-            "NPLANNER · VERSION 0.41",
+            "NPLANNER · VERSION 0.42",
             color = Color(0xFFB6B6B6),
             fontFamily = FontFamily.Default,
             fontSize = 10.sp,
