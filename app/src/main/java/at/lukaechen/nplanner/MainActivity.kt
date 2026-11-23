@@ -2680,6 +2680,27 @@ private fun TrainingScreen(
     val context = LocalContext.current
     // 0 = Workouts (Hauptfokus), 1 = Uebungen, 2 = Rekorde
     var subPage by remember { mutableIntStateOf(0) }
+    val resultPrefs = remember { context.getSharedPreferences("nplanner-v2", Context.MODE_PRIVATE) }
+    var resultRevision by remember { mutableIntStateOf(0) }
+    var selectedAmrapResult by remember { mutableStateOf<JSONObject?>(null) }
+    var exerciseQuery by remember { mutableStateOf("") }
+    var kindFilter by remember { mutableStateOf<ExerciseKind?>(null) }
+    var exerciseDescending by remember { mutableStateOf(false) }
+    var groupExercises by remember { mutableStateOf(true) }
+    var showExerciseFilters by remember { mutableStateOf(false) }
+    val amrapResults = remember(resultRevision, subPage) {
+        resultPrefs.all.entries.filter { it.key.startsWith("amrap_session:") }
+            .mapNotNull { runCatching { JSONObject(it.value as String) }.getOrNull() }
+            .sortedByDescending { it.optLong("endedAt") }
+    }
+    val exerciseComparator = remember { java.text.Collator.getInstance(Locale.GERMAN) }
+    val visibleExercises = exercises.filter {
+        (kindFilter == null || it.kind == kindFilter) && it.name.contains(exerciseQuery, ignoreCase = true)
+    }.sortedWith(Comparator { a, b ->
+        val group = if (groupExercises) a.kind.ordinal.compareTo(b.kind.ordinal) else 0
+        if (group != 0) group else exerciseComparator.compare(a.name, b.name) * if (exerciseDescending) -1 else 1
+    })
+
     val sessionPrefs = remember { context.getSharedPreferences("nplanner-training-session", Context.MODE_PRIVATE) }
     var activeWorkoutSessionId by remember { mutableStateOf(sessionPrefs.getString("active_workout", null)) }
     var sessionStartedAt by remember { mutableStateOf(sessionPrefs.getLong("started_at", 0L)) }
@@ -2989,10 +3010,37 @@ private fun TrainingScreen(
                         }
                     }
                 }
+                if (amrapResults.isNotEmpty()) {
+                    SectionLabel("AMRAP-VERLAUF", topPadding = 20.dp, bottomPadding = 10.dp)
+                    amrapResults.forEach { result ->
+                        AmrapResultCard(result, ndot) { selectedAmrapResult = result }
+                    }
+                }
             }
 
             // ================= UNTERSEITE 1: ALLE ÜBUNGEN =================
             1 -> {
+                OutlinedTextField(exerciseQuery, { exerciseQuery = it }, label = { Text("Übung suchen") },
+                    singleLine = true, modifier = Modifier.fillMaxWidth())
+                TextButton(onClick = { showExerciseFilters = !showExerciseFilters }) {
+                    Text("Filter & Sortierung · ${visibleExercises.size} Übungen", color = White)
+                }
+                if (showExerciseFilters) {
+                    Row(Modifier.horizontalScroll(rememberScrollState()), horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                        ChoiceChip("Alle", kindFilter == null, Modifier.width(70.dp)) { kindFilter = null }
+                        ExerciseKind.values().forEach { kind ->
+                            ChoiceChip(exerciseKindLabel(kind), kindFilter == kind, Modifier.width(135.dp)) { kindFilter = kind }
+                        }
+                    }
+                    Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                        TextButton(onClick = { exerciseDescending = !exerciseDescending }) {
+                            Text(if (exerciseDescending) "Name Z–A" else "Name A–Z", color = White)
+                        }
+                        TextButton(onClick = { groupExercises = !groupExercises }) {
+                            Text(if (groupExercises) "✓ Nach Art gruppiert" else "Nicht gruppiert", color = White)
+                        }
+                    }
+                }
                 Row(
                     Modifier.fillMaxWidth(),
                     horizontalArrangement = Arrangement.spacedBy(8.dp)
@@ -3083,7 +3131,10 @@ private fun TrainingScreen(
                     }
                 } else {
                     Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
-                        exercises.forEach { ex ->
+                        visibleExercises.forEachIndexed { index, ex ->
+                            if (groupExercises && (index == 0 || visibleExercises[index - 1].kind != ex.kind)) {
+                                SectionLabel(exerciseKindLabel(ex.kind).uppercase(Locale.GERMAN), topPadding = 10.dp, bottomPadding = 6.dp)
+                            }
                             val exLogs = logs.filter { it.exerciseId == ex.id }
                             val lastLog = exLogs.lastOrNull()
                             Surface(
@@ -3150,7 +3201,7 @@ private fun TrainingScreen(
                                 Text("REKORDE", color = Muted, fontFamily = FontFamily.Monospace, fontSize = 9.sp, letterSpacing = 1.4.sp)
                             }
                             Spacer(Modifier.height(8.dp))
-                            DisplayTitle("${records.size}", ndot, fontSize = 32.sp)
+                            DisplayTitle("${records.size + amrapResults.filter { it.optBoolean("completed") }.map { it.optString("signature") }.distinct().size}", ndot, fontSize = 32.sp)
                         }
                     }
                     Surface(Modifier.weight(1f), color = Panel, shape = RoundedCornerShape(22.dp)) {
@@ -3166,9 +3217,17 @@ private fun TrainingScreen(
                     }
                 }
 
+                val amrapBests = amrapResults.filter { it.optBoolean("completed") }
+                    .groupBy { it.optString("signature") }
+                    .values.mapNotNull { group -> group.maxByOrNull { it.optInt("score") } }
+                if (amrapBests.isNotEmpty()) {
+                    SectionLabel("AMRAP-BESTLEISTUNGEN", topPadding = 20.dp, bottomPadding = 10.dp)
+                    amrapBests.forEach { result -> AmrapResultCard(result, ndot) { selectedAmrapResult = result } }
+                    Text("Nur vollständig absolvierte Einheiten mit gleicher Dauer und Übungsfolge werden verglichen.", color = Muted, fontSize = 11.sp)
+                }
                 SectionLabel("PERSÖNLICHE BESTLEISTUNGEN", topPadding = 20.dp, bottomPadding = 10.dp)
 
-                if (records.isEmpty()) {
+                if (records.isEmpty() && amrapBests.isEmpty()) {
                     Surface(color = Panel, shape = RoundedCornerShape(22.dp), modifier = Modifier.fillMaxWidth()) {
                         Column(Modifier.padding(18.dp)) {
                             Text("Noch keine Rekorde eingetragen", color = White, fontSize = 14.sp, fontWeight = FontWeight.Medium)
@@ -3225,6 +3284,10 @@ private fun TrainingScreen(
     }
 
     // Subtiles Overlay-Dialog-Fenster fuer das geoeffnete Workout (hier erscheinen die Uebungen)
+    selectedAmrapResult?.let { result ->
+        AmrapSummaryDialog(result, ndot) { selectedAmrapResult = null }
+    }
+
     openWorkoutId?.let { wId ->
         val workout = workouts.find { it.id == wId }
         if (workout == null) {
@@ -3237,7 +3300,7 @@ private fun TrainingScreen(
                     exercises = workout.exerciseIds.mapNotNull { id -> exercises.find { it.id == id } },
                     prefs = sessionPrefs,
                     onDismiss = { openWorkoutId = null },
-                    onFinish = { finishWorkout() },
+                    onFinish = { resultRevision++; finishWorkout() },
                     onHapticTick = onHapticTick
                 )
             } else WorkoutSheetDialog(
@@ -3437,6 +3500,51 @@ private fun TrainingScreen(
     }
 }
 
+private fun amrapScoreText(r: JSONObject): String =
+    "${r.optInt("rounds")} Runden + ${r.optInt("extraExercises")} Übungen"
+
+@Composable
+private fun AmrapResultCard(result: JSONObject, ndot: FontFamily, onClick: () -> Unit) {
+    Surface(Modifier.fillMaxWidth().padding(vertical = 4.dp).clickable(onClick = onClick),
+        color = Panel2, shape = RoundedCornerShape(18.dp)) {
+        Column(Modifier.padding(15.dp)) {
+            Text(result.optString("name"), color = White, fontSize = 16.sp)
+            Text(amrapScoreText(result), color = Red, fontSize = 13.sp)
+            Text(java.text.SimpleDateFormat("dd.MM.yyyy HH:mm", Locale.GERMAN).format(java.util.Date(result.optLong("endedAt"))) +
+                if (result.optBoolean("completed")) " · Abgeschlossen" else " · Vorzeitig beendet", color = Muted, fontSize = 11.sp)
+        }
+    }
+}
+
+@Composable
+private fun AmrapSummaryDialog(result: JSONObject, ndot: FontFamily, onClose: () -> Unit) {
+    Dialog(onDismissRequest = onClose, properties = DialogProperties(usePlatformDefaultWidth = false)) {
+        Surface(Modifier.fillMaxWidth().padding(16.dp), color = Panel, shape = RoundedCornerShape(26.dp)) {
+            Column(Modifier.padding(20.dp).heightIn(max = 570.dp).verticalScroll(rememberScrollState())) {
+                DisplayTitle("AUSWERTUNG", ndot, fontSize = 26.sp)
+                Text(result.optString("name"), color = White, fontSize = 17.sp)
+                Spacer(Modifier.height(14.dp))
+                DisplayTitle("${result.optInt("rounds")} RUNDEN", ndot, fontSize = 30.sp)
+                Text("+ ${result.optInt("extraExercises")} vollständig absolvierte Übungen der nächsten Runde", color = Muted, fontSize = 12.sp)
+                Text("Aktive Zeit: ${result.optLong("elapsedMs") / 60000}:${"%02d".format(result.optLong("elapsedMs") / 1000 % 60)} · Vorgabe: ${result.optInt("durationSeconds") / 60} Min.", color = White, fontSize = 12.sp)
+                Text(if (result.optBoolean("completed")) "Zeit vollständig absolviert" else "Vorzeitig beendet · kein Rekordvergleich", color = Muted, fontSize = 11.sp)
+                SectionLabel("WIEDERHOLUNGEN PRO ÜBUNG", topPadding = 15.dp, bottomPadding = 8.dp)
+                val items = result.optJSONArray("items") ?: JSONArray()
+                for (i in 0 until items.length()) {
+                    val item = items.getJSONObject(i)
+                    Row(Modifier.fillMaxWidth().padding(vertical = 7.dp)) {
+                        Text(item.optString("name"), color = White, fontSize = 14.sp, modifier = Modifier.weight(1f))
+                        Text("${item.optInt("totalReps")} Wdh.", color = Red, fontSize = 13.sp)
+                    }
+                    Text("${item.optInt("target")} je Runde · ${item.optInt("sets")} vollständig bestätigt", color = Muted, fontSize = 10.sp)
+                }
+                Text("Teilwiederholungen einer nicht bestätigten Übung werden nicht geschätzt.", color = Muted, fontSize = 11.sp, modifier = Modifier.padding(top = 12.dp))
+                TextButton(onClick = onClose, modifier = Modifier.align(Alignment.End)) { Text("Schließen", color = White) }
+            }
+        }
+    }
+}
+
 @Composable
 private fun AmrapLiveDialog(
     ndot: FontFamily,
@@ -3447,110 +3555,113 @@ private fun AmrapLiveDialog(
     onFinish: () -> Unit,
     onHapticTick: () -> Unit
 ) {
+    val context = LocalContext.current
+    val resultPrefs = remember { context.getSharedPreferences("nplanner-v2", Context.MODE_PRIVATE) }
     val prefix = "amrap:${workout.id}:"
     val durationMs = workout.durationSeconds.coerceAtLeast(1) * 1000L
-    var exerciseIndex by remember(workout.id) { mutableIntStateOf(prefs.getInt(prefix + "index", 0)) }
+    var index by remember(workout.id) { mutableIntStateOf(prefs.getInt(prefix + "index", 0)) }
     var rounds by remember(workout.id) { mutableIntStateOf(prefs.getInt(prefix + "rounds", 0)) }
     var finished by remember(workout.id) { mutableStateOf(prefs.getBoolean(prefix + "finished", false)) }
     var running by remember(workout.id) { mutableStateOf(prefs.getBoolean(prefix + "running", false)) }
-    var remainingMs by remember(workout.id) { mutableLongStateOf(prefs.getLong(prefix + "remaining", durationMs).coerceIn(0L, durationMs)) }
+    var remaining by remember(workout.id) { mutableLongStateOf(prefs.getLong(prefix + "remaining", durationMs).coerceIn(0L, durationMs)) }
     var endAt by remember(workout.id) { mutableLongStateOf(prefs.getLong(prefix + "endAt", 0L)) }
     var now by remember { mutableLongStateOf(System.currentTimeMillis()) }
-    val count = exercises.size
-    val currentIndex = if (count > 0) exerciseIndex.coerceIn(0, count - 1) else 0
-    val timeLeft = if (running) (endAt - now).coerceAtLeast(0L) else remainingMs
-    val complete = finished || (running && timeLeft == 0L)
-
+    val runId = remember(workout.id) {
+        if (prefs.getBoolean(prefix + "finished", false)) prefs.getString(prefix + "runId", null) ?: UUID.randomUUID().toString()
+        else if (prefs.getBoolean(prefix + "running", false) || prefs.getLong(prefix + "remaining", durationMs) < durationMs)
+            prefs.getString(prefix + "runId", null) ?: UUID.randomUUID().toString()
+        else UUID.randomUUID().toString()
+    }
+    var result by remember { mutableStateOf<JSONObject?>(resultPrefs.getString("amrap_session:$runId", null)?.let { runCatching { JSONObject(it) }.getOrNull() }) }
+    val left = if (running) (endAt - now).coerceAtLeast(0L) else remaining
     fun save() {
-        prefs.edit().putInt(prefix + "index", exerciseIndex).putInt(prefix + "rounds", rounds)
+        prefs.edit().putString(prefix + "runId", runId).putInt(prefix + "index", index).putInt(prefix + "rounds", rounds)
             .putBoolean(prefix + "finished", finished).putBoolean(prefix + "running", running)
-            .putLong(prefix + "remaining", remainingMs).putLong(prefix + "endAt", endAt).apply()
+            .putLong(prefix + "remaining", remaining).putLong(prefix + "endAt", endAt).apply()
+    }
+    fun finish(completed: Boolean) {
+        if (result != null) return
+        val rest = if (running) (endAt - System.currentTimeMillis()).coerceIn(0L, durationMs) else remaining
+        remaining = if (completed) 0L else rest
+        running = false
+        finished = true
+        val items = JSONArray()
+        exercises.forEachIndexed { i, ex ->
+            val target = workout.amrapTargets[ex.id] ?: ex.targetReps.coerceAtLeast(1)
+            val sets = rounds + if (i < index) 1 else 0
+            items.put(JSONObject().put("id", ex.id).put("name", ex.name).put("target", target)
+                .put("sets", sets).put("totalReps", sets * target).put("weightKg", ex.targetWeightKg.toDouble()))
+        }
+        val signature = workout.durationSeconds.toString() + ":" + exercises.joinToString("|") {
+            it.id + ":" + it.kind.name + ":" + it.targetWeightKg + ":" + (workout.amrapTargets[it.id] ?: it.targetReps.coerceAtLeast(1))
+        }
+        val obj = JSONObject().put("name", workout.name).put("workoutId", workout.id).put("runId", runId)
+            .put("endedAt", if (completed) endAt else System.currentTimeMillis()).put("durationSeconds", workout.durationSeconds)
+            .put("elapsedMs", durationMs - remaining).put("rounds", rounds).put("extraExercises", index)
+            .put("score", rounds * exercises.size + index).put("completed", completed)
+            .put("signature", signature).put("items", items)
+        resultPrefs.edit().putString("amrap_session:$runId", obj.toString()).apply()
+        result = obj
+        save()
     }
     LaunchedEffect(workout.id, running, endAt) {
         while (running) {
             now = System.currentTimeMillis()
-            if (now >= endAt) {
-                remainingMs = 0L
-                running = false
-                finished = true
-                save()
-                break
-            }
-            delay(150)
+            if (now >= endAt) { finish(true); break }
+            delay(100)
         }
     }
-    fun toggleTimer() {
-        if (complete) return
+    fun togglePause() {
+        if (finished) return
+        now = System.currentTimeMillis()
         if (running) {
-            remainingMs = (endAt - System.currentTimeMillis()).coerceAtLeast(0L)
+            if (now >= endAt) { finish(true); return }
+            remaining = (endAt - now).coerceAtLeast(0L)
             running = false
         } else {
-            endAt = System.currentTimeMillis() + remainingMs
+            endAt = now + remaining
             running = true
         }
         save()
     }
-    fun nextExercise() {
-        if (!running || complete || count == 0 || System.currentTimeMillis() >= endAt) return
-        if (currentIndex == count - 1) { rounds++; exerciseIndex = 0 }
-        else exerciseIndex = currentIndex + 1
-        save()
-        onHapticTick()
-    }
-    fun undo() {
-        if (count == 0 || (rounds == 0 && currentIndex == 0)) return
-        if (currentIndex == 0) { rounds = (rounds - 1).coerceAtLeast(0); exerciseIndex = count - 1 }
-        else exerciseIndex = currentIndex - 1
-        save()
+    if (result != null) {
+        AmrapSummaryDialog(result!!, ndot) { onFinish() }
+        return
     }
     Dialog(onDismissRequest = onDismiss, properties = DialogProperties(usePlatformDefaultWidth = false)) {
-        Surface(Modifier.fillMaxWidth().padding(horizontal = 16.dp), color = Panel, shape = RoundedCornerShape(28.dp)) {
+        Surface(Modifier.fillMaxWidth().padding(16.dp), color = Panel, shape = RoundedCornerShape(28.dp)) {
             Column(Modifier.padding(20.dp), horizontalAlignment = Alignment.CenterHorizontally) {
-                Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween, verticalAlignment = Alignment.CenterVertically) {
-                    Text("AMRAP · LIVE", color = Red, fontSize = 11.sp, fontFamily = FontFamily.Monospace)
-                    TextButton(onClick = onDismiss) { Text("✕", color = Muted) }
-                }
+                Text("AMRAP · LIVE", color = Red, fontSize = 11.sp)
                 DisplayTitle(workout.name, ndot, fontSize = 25.sp)
-                Spacer(Modifier.height(16.dp))
-                DisplayTitle("%02d:%02d".format(Locale.GERMAN, timeLeft / 60000L, (timeLeft / 1000L) % 60L), ndot, fontSize = 48.sp)
-                Text("VERBLEIBEND", color = Muted, fontSize = 10.sp, fontFamily = FontFamily.Monospace)
-                Spacer(Modifier.height(15.dp))
-                Text("$rounds VOLLSTÄNDIGE RUNDEN", color = White, fontSize = 14.sp)
-                Spacer(Modifier.height(16.dp))
-                Surface(Modifier.fillMaxWidth(), color = Panel2, shape = RoundedCornerShape(20.dp)) {
-                    Column(Modifier.padding(18.dp), horizontalAlignment = Alignment.CenterHorizontally) {
-                        if (count > 0) {
-                            val ex = exercises[currentIndex]
-                            Text("ÜBUNG ${currentIndex + 1} / $count", color = Muted, fontSize = 10.sp)
-                            DisplayTitle(ex.name.uppercase(Locale.GERMAN), ndot, fontSize = 25.sp)
-                            Text("${workout.amrapTargets[ex.id] ?: ex.targetReps.coerceAtLeast(1)} WIEDERHOLUNGEN", color = White, fontSize = 13.sp)
-                        } else Text("Bitte zuerst Übungen hinzufügen.", color = Muted)
-                    }
-                }
                 Spacer(Modifier.height(14.dp))
-                if (complete) {
-                    Text("ZEIT ABGELAUFEN", color = Red, fontSize = 13.sp)
-                } else {
-                    Button(onClick = { if (!running) toggleTimer() else nextExercise() }, enabled = count > 0,
-                        modifier = Modifier.fillMaxWidth().height(52.dp),
-                        colors = ButtonDefaults.buttonColors(containerColor = White, contentColor = Bg),
-                        shape = RoundedCornerShape(16.dp)) {
-                        Text(if (!running) "${if (remainingMs == durationMs) "STARTEN" else "FORTSETZEN"}" else "ÜBUNG ERLEDIGT  ✓")
+                DisplayTitle("%02d:%02d".format(Locale.GERMAN, ((left + 999) / 1000) / 60, ((left + 999) / 1000) % 60), ndot, fontSize = 46.sp)
+                Text(if (running) "LÄUFT" else "PAUSIERT / BEREIT", color = Muted, fontSize = 11.sp)
+                Text("$rounds vollständige Runden", color = White, fontSize = 16.sp)
+                Spacer(Modifier.height(16.dp))
+                val ex = exercises.getOrNull(index)
+                if (ex != null) {
+                    DisplayTitle(ex.name.uppercase(Locale.GERMAN), ndot, fontSize = 25.sp)
+                    Text("${workout.amrapTargets[ex.id] ?: ex.targetReps.coerceAtLeast(1)} Wiederholungen", color = White)
+                }
+                Button(onClick = {
+                    if (!running) togglePause()
+                    else if (System.currentTimeMillis() >= endAt) finish(true)
+                    else {
+                        if (index >= exercises.lastIndex) { rounds++; index = 0 } else index++
+                        save(); onHapticTick()
                     }
+                }, enabled = exercises.isNotEmpty() && !finished,
+                    modifier = Modifier.fillMaxWidth().padding(top = 18.dp).height(52.dp),
+                    colors = ButtonDefaults.buttonColors(containerColor = White, contentColor = Bg)) {
+                    Text(if (running) "ÜBUNG ERLEDIGT ✓" else if (remaining == durationMs) "STARTEN" else "FORTSETZEN")
+                }
+                TextButton(onClick = { togglePause() }, enabled = !finished && (running || remaining < durationMs)) {
+                    Text(if (running) "Pause" else "Fortsetzen", color = White)
                 }
                 Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
-                    TextButton(onClick = { undo() }, enabled = !complete) { Text("↶ Rückgängig", color = Muted) }
-                    TextButton(onClick = { toggleTimer() }, enabled = !complete && remainingMs < durationMs) {
-                        Text(if (running) "Pause" else "Fortsetzen", color = White)
-                    }
+                    TextButton(onClick = onDismiss) { Text("Minimieren", color = Muted) }
+                    TextButton(onClick = { finish(running && System.currentTimeMillis() >= endAt) }) { Text("Beenden", color = Red) }
                 }
-                TextButton(onClick = {
-                    if (running) remainingMs = (endAt - System.currentTimeMillis()).coerceAtLeast(0L)
-                    running = false
-                    finished = true
-                    save()
-                    onFinish()
-                }) { Text(if (complete) "Workout abschließen" else "Workout beenden", color = Red) }
             }
         }
     }
@@ -3903,18 +4014,9 @@ private fun WorkoutEditorDialog(
                             val finalName = name.trim().ifBlank { fallback }
                             val orderedIds = allExercises.filter { it.id in selectedIds }.map { it.id } +
                                 selectedIds.filterNot { id -> allExercises.any { it.id == id } }
-                            onSave(
-    finalName,
-    note.trim(),
-    orderedIds,
-    workoutKind,
-    if (workoutKind == WorkoutKind.CLASSIC) {
-        0
-    } else {
-        (durationText.toIntOrNull() ?: 20).coerceIn(1, 480) * 60
-    },
-    selectedPresetTargets.filterKeys { it in selectedIds }
-)
+                            onSave(finalName, note.trim(), orderedIds, workoutKind,
+                                if (workoutKind == WorkoutKind.CLASSIC) 0 else (durationText.toIntOrNull() ?: 20).coerceIn(1, 480) * 60,
+                                selectedPresetTargets.filterKeys { it in selectedIds })
                         }
                     ) { Text(if (isNew) "Erstellen" else "Speichern") }
                 }
@@ -5354,7 +5456,7 @@ private fun SetupScreen(
         )
         HorizontalDivider(color = Color(0xFF242424), modifier = Modifier.padding(top = 6.dp))
         Text(
-            "NPLANNER · VERSION 0.32",
+            "NPLANNER · VERSION 0.33",
             color = Color(0xFFB6B6B6),
             fontFamily = FontFamily.Monospace,
             fontSize = 10.sp,
