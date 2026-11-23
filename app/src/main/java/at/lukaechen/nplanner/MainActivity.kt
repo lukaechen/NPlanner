@@ -210,6 +210,7 @@ data class Workout(
 )
 
 private val LocalDotHeadings = compositionLocalOf { false }
+private val LocalClassicHeadings = compositionLocalOf { FontFamily.Default }
 
 // ---------- Zeit- und Regel-Helfer ----------
 
@@ -578,7 +579,27 @@ class MainActivity : ComponentActivity() {
         prefs.edit().putString("rules", array.toString()).apply()
     }
 
-    private fun loadExercises(): List<Exercise> = try {
+    private fun starterExerciseCatalog(): List<Exercise> = listOf(
+        Exercise("ex-pullups", "Klimmzüge", "Rücken", primaryMuscleId = "lats", secondaryMuscleIds = listOf("biceps"), kind = ExerciseKind.BODYWEIGHT, targetReps = 5),
+        Exercise("ex-squats", "Kniebeugen", "Beine", primaryMuscleId = "quads", secondaryMuscleIds = listOf("glutes_max"), kind = ExerciseKind.BODYWEIGHT, targetReps = 15),
+        Exercise("ex-rowing", "Rudern", "Rücken", primaryMuscleId = "back", kind = ExerciseKind.WEIGHT, targetWeightKg = 35f, targetReps = 10),
+        Exercise("ex-shoulder-press", "Schulterdrücken", "Schultern", primaryMuscleId = "front_delts", kind = ExerciseKind.WEIGHT, targetWeightKg = 20f, targetReps = 10),
+        Exercise("ex-deadlift", "Kreuzheben", "Rücken", primaryMuscleId = "lower_back", secondaryMuscleIds = listOf("hamstrings"), kind = ExerciseKind.WEIGHT, targetWeightKg = 50f, targetReps = 8),
+        Exercise("ex-lunges", "Ausfallschritte", "Beine", primaryMuscleId = "quads", kind = ExerciseKind.BODYWEIGHT, targetReps = 12),
+        Exercise("ex-dips", "Dips", "Arme", primaryMuscleId = "triceps", kind = ExerciseKind.BODYWEIGHT, targetReps = 10),
+        Exercise("ex-plank", "Plank", "Bauch & Core", primaryMuscleId = "core", kind = ExerciseKind.TIMED, targetReps = 1, targetSeconds = 60),
+        Exercise("ex-crunches", "Crunches", "Bauch & Core", primaryMuscleId = "abs", kind = ExerciseKind.BODYWEIGHT, targetReps = 20),
+        Exercise("ex-calf-raises", "Wadenheben", "Waden", primaryMuscleId = "calves", kind = ExerciseKind.BODYWEIGHT, targetReps = 20),
+        Exercise("ex-running", "Laufen", "Beine", primaryMuscleId = "legs", kind = ExerciseKind.CARDIO, targetSeconds = 1200),
+        Exercise("ex-cycling", "Radfahren", "Beine", primaryMuscleId = "legs", kind = ExerciseKind.CARDIO, targetSeconds = 1800),
+        Exercise("ex-row-erg", "Ruderergometer", "Rücken", primaryMuscleId = "back", kind = ExerciseKind.CARDIO, targetSeconds = 1200),
+        Exercise("ex-swimming", "Schwimmen", "Ganzkörper", primaryMuscleId = "full_body", kind = ExerciseKind.CARDIO, targetSeconds = 1200),
+        Exercise("ex-jump-rope", "Seilspringen", "Waden", primaryMuscleId = "calves", kind = ExerciseKind.CARDIO, targetSeconds = 600),
+        Exercise("ex-burpees", "Burpees", "Ganzkörper", primaryMuscleId = "full_body", kind = ExerciseKind.BODYWEIGHT, targetReps = 12)
+    )
+
+    private fun loadExercises(): List<Exercise> {
+        val loaded = try {
         val raw = prefs.getString("exercises_v1", null)
         if (raw == null) {
             val defaults = listOf(
@@ -653,6 +674,14 @@ class MainActivity : ComponentActivity() {
             }
         }
     } catch (_: Exception) { emptyList() }
+        if (prefs.getBoolean("seed_exercises_v31", false)) return loaded
+        val knownNames = loaded.map { it.name.trim().lowercase(Locale.GERMAN) }.toSet()
+        val additions = starterExerciseCatalog().filter { it.name.lowercase(Locale.GERMAN) !in knownNames }
+        val merged = loaded + additions
+        if (additions.isNotEmpty()) saveExercises(merged)
+        prefs.edit().putBoolean("seed_exercises_v31", true).apply()
+        return merged
+    }
 
     private fun saveExercises(list: List<Exercise>) {
         val arr = JSONArray()
@@ -772,6 +801,12 @@ class MainActivity : ComponentActivity() {
         NPlannerRoomBridge.start(applicationContext, prefs)
         setContent {
             val ndot = FontFamily(androidx.compose.ui.text.font.Font(resId = R.font.ndot_47))
+            // NType 82 is supplied separately as app/src/main/res/font/ntype_82.ttf.
+            // Resolve dynamically so an absent file does not break compilation.
+            val ntypeId = resources.getIdentifier("ntype_82", "font", packageName)
+            val classicHeadings = if (ntypeId != 0) {
+                FontFamily(androidx.compose.ui.text.font.Font(resId = ntypeId))
+            } else FontFamily.Default
             MaterialTheme(
                 colorScheme = darkColorScheme(
                     primary = White,
@@ -787,7 +822,10 @@ class MainActivity : ComponentActivity() {
                 ),
                 typography = Typography()
             ) {
-                CompositionLocalProvider(LocalContentColor provides White) {
+                CompositionLocalProvider(
+                    LocalContentColor provides White,
+                    LocalClassicHeadings provides classicHeadings
+                ) {
                     NPlanner(ndot)
                 }
             }
@@ -1040,20 +1078,26 @@ class MainActivity : ComponentActivity() {
         var directTarget by remember { mutableStateOf<Int?>(null) }
         var overlayPage by remember { mutableIntStateOf(0) }
         var directSwitching by remember { mutableStateOf(false) }
+        var directSource by remember { mutableIntStateOf(0) }
+        val directProgress = remember { Animatable(0f) }
 
         fun selectPage(target: Int) {
             if (target !in 0..3 || directSwitching || target == pagerState.currentPage) return
             triggerHaptic(context, haptic, HapticStyle.TICK)
-            directSwitching = true
-            overlayPage = pagerState.currentPage
+            directSource = pagerState.currentPage
             directTarget = target
+            directSwitching = true
             scope.launch {
-                // Switch target on the next composition without an extra frame of waiting.
-                overlayPage = target
-                pagerState.scrollToPage(target)
-                delay(190)
-                directTarget = null
-                directSwitching = false
+                try {
+                    directProgress.snapTo(0f)
+                    // Pager jumps behind the overlay. The user only sees source and target.
+                    pagerState.scrollToPage(target)
+                    directProgress.animateTo(1f, tween(220, easing = FastOutSlowInEasing))
+                } finally {
+                    directTarget = null
+                    directSwitching = false
+                    directProgress.snapTo(0f)
+                }
             }
         }
 
@@ -1211,22 +1255,18 @@ class MainActivity : ComponentActivity() {
                 ) { p ->
                     PageContent(p)
                 }
-                if (directTarget != null) {
-                    AnimatedContent(
-                        targetState = overlayPage,
-                        modifier = Modifier.fillMaxSize().background(Bg),
-                        transitionSpec = {
-                            val forward = targetState > initialState
-                            val enter = slideInHorizontally(tween(180, easing = FastOutSlowInEasing)) {
-                                if (forward) it else -it
-                            }
-                            val exit = slideOutHorizontally(tween(180, easing = FastOutSlowInEasing)) {
-                                if (forward) -it else it
-                            }
-                            enter togetherWith exit
-                        },
-                        label = "directTabSlide"
-                    ) { p -> PageContent(p) }
+                directTarget?.let { target ->
+                    val forward = target > directSource
+                    BoxWithConstraints(Modifier.fillMaxSize().background(Bg)) {
+                        val widthPx = with(LocalDensity.current) { maxWidth.toPx() }
+                        val shift = directProgress.value * widthPx
+                        Box(Modifier.fillMaxSize().graphicsLayer {
+                            translationX = if (forward) -shift else shift
+                        }) { PageContent(directSource) }
+                        Box(Modifier.fillMaxSize().graphicsLayer {
+                            translationX = if (forward) widthPx - shift else -widthPx + shift
+                        }) { PageContent(target) }
+                    }
                 }
                 GlyphNav(
                     pagerState = pagerState,
@@ -1285,7 +1325,7 @@ private fun DisplayTitle(
         text = text,
         modifier = modifier,
         color = White,
-        fontFamily = if (useDot) ndot else FontFamily.Default,
+        fontFamily = if (useDot) ndot else LocalClassicHeadings.current,
         fontWeight = if (useDot) FontWeight.Normal else FontWeight.Light,
         fontSize = fontSize,
         lineHeight = fontSize * 1.12f,
@@ -1302,7 +1342,7 @@ private fun DisplayCount(done: Int, total: Int, ndot: FontFamily, fontSize: Text
             withStyle(SpanStyle(color = Color(0xFF5A5A5A))) { append("/$total") }
         },
         color = White,
-        fontFamily = if (useDot) ndot else FontFamily.Default,
+        fontFamily = if (useDot) ndot else LocalClassicHeadings.current,
         fontWeight = if (useDot) FontWeight.Normal else FontWeight.Light,
         fontSize = fontSize,
         lineHeight = fontSize,
@@ -3241,6 +3281,7 @@ private fun TrainingScreen(
             existingWorkouts = workouts,
             allExercises = exercises,
             isNew = true,
+            onAddPresetExercises = { missing -> onImportExercises(missing, null) },
             onDismiss = { showNewWorkoutDialog = false },
             onSave = { finalName, note, selectedIds, kind, durationSeconds ->
                 val created = Workout(
@@ -3270,6 +3311,7 @@ private fun TrainingScreen(
             existingWorkouts = workouts,
             allExercises = exercises,
             isNew = false,
+            onAddPresetExercises = { missing -> onImportExercises(missing, null) },
             onDismiss = { editingWorkout = null },
             onSave = { finalName, note, selectedIds, kind, durationSeconds ->
                 onUpdateWorkout(
@@ -3538,14 +3580,37 @@ private data class WorkoutPreset(
     val description: String
 )
 
+private fun presetExercise(name: String): Exercise? {
+    val options = listOf(
+        Exercise("ex-pullups", "Klimmzüge", "Rücken", primaryMuscleId = "lats", kind = ExerciseKind.BODYWEIGHT, targetReps = 5),
+        Exercise("ex-squats", "Kniebeugen", "Beine", primaryMuscleId = "quads", kind = ExerciseKind.BODYWEIGHT, targetReps = 15),
+        Exercise("ex-pushups", "Liegestütze", "Brust", primaryMuscleId = "chest", kind = ExerciseKind.BODYWEIGHT, targetReps = 10),
+        Exercise("ex-bench-press", "Bankdrücken", "Brust", primaryMuscleId = "chest", kind = ExerciseKind.WEIGHT, targetWeightKg = 60f, targetReps = 8),
+        Exercise("ex-rowing", "Rudern", "Rücken", primaryMuscleId = "back", kind = ExerciseKind.WEIGHT, targetWeightKg = 35f, targetReps = 10),
+        Exercise("ex-shoulder-press", "Schulterdrücken", "Schultern", primaryMuscleId = "front_delts", kind = ExerciseKind.WEIGHT, targetWeightKg = 20f, targetReps = 10),
+        Exercise("ex-deadlift", "Kreuzheben", "Rücken", primaryMuscleId = "lower_back", kind = ExerciseKind.WEIGHT, targetWeightKg = 50f, targetReps = 8),
+        Exercise("ex-lunges", "Ausfallschritte", "Beine", primaryMuscleId = "quads", kind = ExerciseKind.BODYWEIGHT, targetReps = 12),
+        Exercise("ex-calf-raises", "Wadenheben", "Waden", primaryMuscleId = "calves", kind = ExerciseKind.BODYWEIGHT, targetReps = 20),
+        Exercise("ex-running", "Laufen", "Beine", primaryMuscleId = "legs", kind = ExerciseKind.CARDIO, targetSeconds = 1200),
+        Exercise("ex-row-erg", "Ruderergometer", "Rücken", primaryMuscleId = "back", kind = ExerciseKind.CARDIO, targetSeconds = 1200),
+        Exercise("ex-cycling", "Radfahren", "Beine", primaryMuscleId = "legs", kind = ExerciseKind.CARDIO, targetSeconds = 1800)
+    )
+    return options.firstOrNull { it.name.equals(name, ignoreCase = true) }
+}
+
 private val workoutPresets = listOf(
     WorkoutPreset("Cindy", WorkoutKind.AMRAP, 20,
         listOf("Klimmzüge", "Liegestütze", "Kniebeugen"),
-        "Pro Runde: 5 Klimmzüge, 10 Liegestütze, 15 Kniebeugen."),
-    WorkoutPreset("Ganzkörper", WorkoutKind.CLASSIC, 0,
-        listOf("Kniebeugen", "Liegestütze", "Rudern"), "Ganzkörpertraining"),
+        "20 Min. AMRAP: je Runde 5 Klimmzüge, 10 Liegestütze, 15 Kniebeugen."),
+    WorkoutPreset("Oberkörper", WorkoutKind.CLASSIC, 0,
+        listOf("Bankdrücken", "Rudern", "Schulterdrücken", "Klimmzüge"),
+        "Oberkörper: Drücken und Ziehen im Wechsel."),
+    WorkoutPreset("Unterkörper", WorkoutKind.CLASSIC, 0,
+        listOf("Kniebeugen", "Ausfallschritte", "Kreuzheben", "Wadenheben"),
+        "Unterkörper mit Kraft- und Stabilitätsübungen."),
     WorkoutPreset("Cardio-Mix", WorkoutKind.CLASSIC, 0,
-        listOf("Laufen", "Rudern", "Radfahren"), "Ausdauertraining")
+        listOf("Laufen", "Ruderergometer", "Radfahren"),
+        "Ausdauertraining mit drei Cardio-Stationen.")
 )
 
 @Composable
@@ -3560,6 +3625,7 @@ private fun WorkoutEditorDialog(
     existingWorkouts: List<Workout>,
     allExercises: List<Exercise>,
     isNew: Boolean,
+    onAddPresetExercises: (List<Exercise>) -> Unit,
     onDismiss: () -> Unit,
     onSave: (String, String, List<String>, WorkoutKind, Int) -> Unit
 ) {
@@ -3687,12 +3753,18 @@ private fun WorkoutEditorDialog(
                                 name = preset.title
                                 nameManuallyEdited = true
                                 note = preset.description
-                                val matches = allExercises.filter { ex ->
-                                    preset.exerciseNames.any { n -> ex.name.equals(n, ignoreCase = true) }
-                                }.map { it.id }
-                                selectedIds = matches.toSet()
-                                val missing = preset.exerciseNames.size - matches.size
-                                presetNotice = if (missing > 0) "$missing Übung(en) fehlen noch in deiner Bibliothek. Bitte ergänzen." else "${matches.size} Übungen übernommen."
+                                val existing = allExercises.associateBy { it.name.trim().lowercase(Locale.GERMAN) }
+                                val missing = preset.exerciseNames.mapNotNull { n ->
+                                    if (n.trim().lowercase(Locale.GERMAN) in existing) null
+                                    else presetExercise(n)?.copy(id = UUID.randomUUID().toString())
+                                }
+                                if (missing.isNotEmpty()) onAddPresetExercises(missing)
+                                val selected = preset.exerciseNames.mapNotNull { n ->
+                                    existing[n.trim().lowercase(Locale.GERMAN)]?.id
+                                        ?: missing.firstOrNull { it.name.equals(n, ignoreCase = true) }?.id
+                                }
+                                selectedIds = selected.toSet()
+                                presetNotice = "${selected.size}/${preset.exerciseNames.size} Übungen übernommen."
                                 showPresetPicker = false
                             }) {
                             Column(Modifier.padding(13.dp)) {
@@ -5073,7 +5145,7 @@ private fun SetupScreen(
         )
         HorizontalDivider(color = Color(0xFF242424), modifier = Modifier.padding(top = 6.dp))
         Text(
-            "NPLANNER · VERSION 0.30",
+            "NPLANNER · VERSION 0.31",
             color = Color(0xFFB6B6B6),
             fontFamily = FontFamily.Monospace,
             fontSize = 10.sp,
