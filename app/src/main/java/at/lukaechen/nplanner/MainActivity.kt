@@ -2670,22 +2670,6 @@ private fun TrainingScreen(
             }, "Übung teilen"))
         }
     }
-    var pendingExerciseExport by remember { mutableStateOf("") }
-    val exportLauncher = rememberLauncherForActivityResult(ActivityResultContracts.CreateDocument("application/json")) { uri ->
-        if (uri != null && pendingExerciseExport.isNotBlank()) {
-            runCatching {
-                context.contentResolver.openOutputStream(uri)?.bufferedWriter()?.use { it.write(pendingExerciseExport) }
-            }.onFailure { Toast.makeText(context, "Export fehlgeschlagen.", Toast.LENGTH_SHORT).show() }
-        }
-    }
-    fun shareExercise(ex: Exercise) {
-        val payload = exportNpefJson(listOf(ex))
-        context.startActivity(Intent.createChooser(Intent(Intent.ACTION_SEND).apply {
-            type = "application/json"
-            putExtra(Intent.EXTRA_TEXT, payload)
-        }, "Übung teilen"))
-    }
-
     var targetWorkoutForNewEx by remember { mutableStateOf<String?>(null) }
 
     val todayStr = today.toString()
