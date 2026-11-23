@@ -1272,6 +1272,20 @@ class MainActivity : ComponentActivity() {
                                     triggerHaptic(context, haptic, HapticStyle.TASK_DONE)
                                 }
                             },
+                            onDeleteSessionLogs = { ids ->
+                                val affected = exerciseLogs.filter { it.id in ids }.map { it.exerciseId }.toSet()
+                                exerciseLogs = exerciseLogs.filterNot { it.id in ids }
+                                saveExerciseLogs(exerciseLogs)
+                                exercises = exercises.map { ex ->
+                                    val latest = exerciseLogs.lastOrNull { it.exerciseId == ex.id }
+                                    if (ex.id !in affected || latest == null) ex else ex.copy(
+                                        targetWeightKg = if (ex.kind == ExerciseKind.WEIGHT) latest.weightKg else ex.targetWeightKg,
+                                        targetReps = latest.reps.takeIf { it > 0 } ?: ex.targetReps,
+                                        targetSeconds = latest.seconds.takeIf { it > 0 } ?: ex.targetSeconds
+                                    )
+                                }
+                                saveExercises(exercises)
+                            },
                             onDeleteLog = { logId ->
                                 exerciseLogs = exerciseLogs.filterNot { it.id == logId }
                                 saveExerciseLogs(exerciseLogs)
@@ -2756,6 +2770,7 @@ private fun TrainingScreen(
     onDeleteExercise: (String) -> Unit,
     onLogSet: (ExerciseLog) -> Unit,
     onDeleteLog: (String) -> Unit,
+    onDeleteSessionLogs: (Set<String>) -> Unit,
     onHapticTick: () -> Unit
 ) {
     val context = LocalContext.current
@@ -2807,6 +2822,7 @@ private fun TrainingScreen(
         })
     }
     var selectedWorkoutResult by remember { mutableStateOf<JSONObject?>(null) }
+    var pendingHistoryDelete by remember { mutableStateOf<Pair<Boolean, JSONObject>?>(null) }
     var showAddExistingExercise by remember { mutableStateOf(false) }
     var openWorkoutId by remember { mutableStateOf<String?>(null) }
     var amrapWorkoutId by remember { mutableStateOf<String?>(sessionPrefs.getString("amrap_workout", null)) }
@@ -2977,6 +2993,26 @@ private fun TrainingScreen(
         when (subPage) {
             // ================= UNTERSEITE 0: WORKOUTS (HAUPTFOKUS) =================
             0 -> {
+                Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+                    Surface(color = White, shape = RoundedCornerShape(18.dp), modifier = Modifier.weight(1f).clickable {
+                        requestedStandardTemplate = null
+                        requestedPersonalTemplate = null
+                        showNewWorkoutDialog = true
+                    }) {
+                        Column(Modifier.padding(15.dp)) {
+                            Text("+ NEUES WORKOUT", color = Bg, fontSize = 12.sp)
+                            Text("Selbst zusammenstellen", color = Color(0xFF555555), fontSize = 10.sp)
+                        }
+                    }
+                    Surface(color = Panel2, shape = RoundedCornerShape(18.dp), modifier = Modifier.weight(1f).clickable {
+                        showTemplateManager = true
+                    }) {
+                        Column(Modifier.padding(15.dp)) {
+                            Text("VORLAGEN", color = White, fontSize = 12.sp)
+                            Text("Wählen · verwalten · löschen", color = Muted, fontSize = 10.sp)
+                        }
+                    }
+                }
                 SectionLabel("VERGANGENE WORKOUTS", topPadding = 22.dp, bottomPadding = 10.dp)
                 if (pastWorkouts.isEmpty()) Text("Abgeschlossene Workouts erscheinen hier.", color = Muted, fontSize = 12.sp)
                 pastWorkouts.forEach { result ->
@@ -2994,33 +3030,7 @@ private fun TrainingScreen(
                     }
                 }
                 Spacer(Modifier.height(18.dp))
-                Row(
-                    Modifier.fillMaxWidth(),
-                    verticalAlignment = Alignment.CenterVertically,
-                    horizontalArrangement = Arrangement.SpaceBetween
-                ) {
-                    Text(
-                        "WORKOUTS",
-                        color = Muted,
-                        fontFamily = FontFamily.Default,
-                        fontSize = 10.sp,
-                        letterSpacing = 1.6.sp
-                    )
-                    Row(verticalAlignment = Alignment.CenterVertically) {
-                        TextButton(onClick = { showTemplateManager = true }) {
-                            Text("VORLAGEN", color = Muted, fontSize = 10.sp, fontFamily = FontFamily.Default)
-                        }
-                    TextButton(onClick = {
-                        onHapticTick()
-                        requestedStandardTemplate = null
-                        requestedPersonalTemplate = null
-                        showNewWorkoutDialog = true
-                    }) {
-                        Text("+ WORKOUT", color = White, fontFamily = FontFamily.Default, fontSize = 11.sp, letterSpacing = 1.4.sp)
-                    }
-                    }
-                }
-
+                SectionLabel("WORKOUTS VORBEREITEN", topPadding = 6.dp, bottomPadding = 10.dp)
                 if (workouts.none { it.kind != WorkoutKind.AMRAP && it.id != activeWorkoutSessionId }) {
                     Surface(
                         color = Panel,
@@ -3352,12 +3362,49 @@ private fun TrainingScreen(
     }
 
     // Subtiles Overlay-Dialog-Fenster fuer das geoeffnete Workout (hier erscheinen die Uebungen)
+    pendingHistoryDelete?.let { (isAmrap, result) ->
+        AlertDialog(
+            onDismissRequest = { pendingHistoryDelete = null }, containerColor = Panel,
+            title = { DisplayTitle("TRAINING LÖSCHEN?", ndot, fontSize = 24.sp) },
+            text = { Text(if (isAmrap)
+                "Diese AMRAP-Einheit wird aus Verlauf und Rekorden entfernt. Vorlagen bleiben erhalten."
+                else if (result.optBoolean("legacy"))
+                "Diese ältere Tagesaufzeichnung und alle zugehörigen Sätze dieses Workouts an diesem Tag werden gelöscht. Rekorde werden neu berechnet. Vorlagen bleiben erhalten."
+                else "Diese Trainingseinheit und ihre Sätze werden gelöscht. Rekorde werden neu berechnet. Workouts und Vorlagen bleiben erhalten.", color = Muted) },
+            confirmButton = { TextButton(onClick = {
+                val runId = result.optString("runId")
+                if (isAmrap) {
+                    resultPrefs.edit().remove("amrap_session:$runId").apply()
+                    selectedAmrapResult = null
+                } else {
+                    val storedIds = result.optJSONArray("logIds")
+                    val ids = if (storedIds != null) (0 until storedIds.length()).map { storedIds.optString(it) }.toSet()
+                    else logs.filter { log ->
+                        if (result.optBoolean("legacy")) log.sessionId.isBlank() &&
+                            log.workoutId == result.optString("workoutId") && log.date == result.optString("legacyDate")
+                        else log.sessionId == runId && log.workoutId == result.optString("workoutId")
+                    }.map { it.id }.toSet()
+                    onDeleteSessionLogs(ids)
+                    resultPrefs.edit().remove("workout_session:$runId").apply()
+                    selectedWorkoutResult = null
+                }
+                resultRevision++
+                pendingHistoryDelete = null
+            }) { Text("Endgültig löschen", color = Red) } },
+            dismissButton = { TextButton(onClick = { pendingHistoryDelete = null }) { Text("Abbrechen") } }
+        )
+    }
+
     selectedWorkoutResult?.let { result ->
-        WorkoutSessionSummary(result, ndot) { selectedWorkoutResult = null }
+        WorkoutSessionSummary(result, ndot,
+            onDelete = { pendingHistoryDelete = false to result },
+            onClose = { selectedWorkoutResult = null })
     }
 
     selectedAmrapResult?.let { result ->
-        AmrapSummaryDialog(result, ndot) { selectedAmrapResult = null }
+        AmrapSummaryDialog(result, ndot,
+            onDelete = { pendingHistoryDelete = true to result },
+            onClose = { selectedAmrapResult = null })
     }
 
     openWorkoutId?.let { wId ->
@@ -3731,7 +3778,7 @@ private fun AmrapResultCard(result: JSONObject, ndot: FontFamily, onClick: () ->
 }
 
 @Composable
-private fun AmrapSummaryDialog(result: JSONObject, ndot: FontFamily, onClose: () -> Unit) {
+private fun AmrapSummaryDialog(result: JSONObject, ndot: FontFamily, onDelete: (() -> Unit)? = null, onClose: () -> Unit) {
     val items = result.optJSONArray("items") ?: JSONArray()
     val totalReps = (0 until items.length()).sumOf { items.optJSONObject(it)?.optInt("totalReps") ?: 0 }
     val completed = result.optBoolean("completed")
@@ -3745,6 +3792,10 @@ private fun AmrapSummaryDialog(result: JSONObject, ndot: FontFamily, onClose: ()
                     Spacer(Modifier.width(9.dp))
                     Text("TRAININGSERGEBNIS", color = Muted, fontFamily = FontFamily.Default,
                         fontSize = 10.sp, letterSpacing = 1.4.sp, modifier = Modifier.weight(1f))
+                    if (onDelete != null) IconButton(onClick = onDelete,
+                        modifier = Modifier.semantics { contentDescription = "Vergangenes AMRAP löschen" }) {
+                        WorkoutActionIcon(WorkoutAction.DELETE, Red)
+                    }
                     TextButton(onClick = onClose) { Text("✕", color = White) }
                 }
                 DisplayTitle(result.optString("name").uppercase(Locale.GERMAN), ndot, fontSize = 26.sp)
@@ -4037,45 +4088,124 @@ private fun workoutSessionSnapshot(
         }
     }
     return JSONObject().put("runId", runId).put("workoutId", workout.id).put("name", workout.name)
+        .put("logIds", JSONArray(logs.map { it.id }))
         .put("startedAt", startedAt).put("endedAt", endedAt).put("setCount", logs.size)
         .put("items", items).put("elapsedMs", if (startedAt > 0L && endedAt >= startedAt) endedAt - startedAt else 0L)
 }
 
+private data class WorkoutSetGroup(val label: String, val count: Int)
+
+private fun workoutSetLabel(set: JSONObject, kind: ExerciseKind): String = when (kind) {
+    ExerciseKind.WEIGHT -> "${java.math.BigDecimal.valueOf(set.optDouble("weightKg")).stripTrailingZeros().toPlainString().replace('.', ',')} kg × ${set.optInt("reps")} Wdh."
+    ExerciseKind.BODYWEIGHT -> "${set.optInt("reps")} Wdh."
+    ExerciseKind.CARDIO -> "%02d:%02d".format(Locale.GERMAN, set.optInt("seconds") / 60, set.optInt("seconds") % 60) +
+        if (set.optDouble("distanceKm") > 0) " · ${set.optDouble("distanceKm")} km" else ""
+    ExerciseKind.TIMED, ExerciseKind.AMRAP -> "${set.optInt("seconds")} Sek."
+}
+
+private fun groupedWorkoutSets(sets: JSONArray, kind: ExerciseKind): List<WorkoutSetGroup> {
+    val counts = linkedMapOf<String, Int>()
+    for (i in 0 until sets.length()) {
+        val set = sets.optJSONObject(i) ?: continue
+        val label = workoutSetLabel(set, kind)
+        counts[label] = (counts[label] ?: 0) + 1
+    }
+    return counts.map { (label, count) -> WorkoutSetGroup(label, count) }
+}
+
 @Composable
-private fun WorkoutSessionSummary(result: JSONObject, ndot: FontFamily, onClose: () -> Unit) {
+private fun WorkoutSessionSummary(
+    result: JSONObject, ndot: FontFamily,
+    onDelete: (() -> Unit)? = null,
+    onClose: () -> Unit
+) {
+    val items = result.optJSONArray("items") ?: JSONArray()
+    val elapsed = result.optLong("elapsedMs") / 1000
+    val height = androidx.compose.ui.platform.LocalConfiguration.current.screenHeightDp.dp * .85f
     Dialog(onDismissRequest = onClose, properties = DialogProperties(usePlatformDefaultWidth = false)) {
-        Surface(Modifier.fillMaxWidth().padding(16.dp), color = Panel, shape = RoundedCornerShape(28.dp)) {
-            Column(Modifier.padding(20.dp).heightIn(max = 570.dp).verticalScroll(rememberScrollState())) {
-                Text("ABGESCHLOSSENES WORKOUT", color = Red, fontSize = 10.sp)
-                Spacer(Modifier.height(6.dp))
+        Surface(Modifier.fillMaxWidth().padding(16.dp).height(height), color = Panel, shape = RoundedCornerShape(28.dp)) {
+            Column(Modifier.padding(18.dp)) {
+                Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
+                    Text("TRAINING GESPEICHERT", color = Red, fontSize = 10.sp, modifier = Modifier.weight(1f))
+                    if (onDelete != null) IconButton(onClick = onDelete,
+                        modifier = Modifier.semantics { contentDescription = "Vergangenes Workout löschen" }) {
+                        WorkoutActionIcon(WorkoutAction.DELETE, Red)
+                    }
+                }
                 DisplayTitle(result.optString("name"), ndot, fontSize = 26.sp)
-                Text("${result.optInt("setCount")} Sätze" + if (result.optBoolean("legacy"))
-                    " · ${result.optString("legacyDate")} · ältere Tagesaufzeichnung"
-                    else " · ${result.optLong("elapsedMs") / 60000} Min.", color = Muted, fontSize = 12.sp)
-                if (result.optBoolean("legacy")) Text("Frühere Einheiten wurden nur nach Tag und Workout gespeichert. Eine genaue Sitzungsdauer ist nicht verfügbar.",
-                    color = Muted, fontSize = 11.sp, modifier = Modifier.padding(top = 8.dp))
-                val items = result.optJSONArray("items") ?: JSONArray()
-                if (items.length() == 0) Text("Keine Sätze erfasst.", color = Muted, modifier = Modifier.padding(top = 14.dp))
-                for (i in 0 until items.length()) {
-                    val item = items.getJSONObject(i)
-                    SectionLabel(item.optString("name").uppercase(Locale.GERMAN), topPadding = 18.dp, bottomPadding = 8.dp)
-                    val sets = item.optJSONArray("sets") ?: JSONArray()
-                    val kind = runCatching { ExerciseKind.valueOf(item.optString("kind")) }.getOrDefault(ExerciseKind.WEIGHT)
-                    for (j in 0 until sets.length()) {
-                        val set = sets.getJSONObject(j)
-                        val text = when (kind) {
-                            ExerciseKind.WEIGHT -> "${fmtKg(set.optDouble("weightKg").toFloat())} × ${set.optInt("reps")}"
-                            ExerciseKind.BODYWEIGHT -> "${set.optInt("reps")} Wiederholungen"
-                            ExerciseKind.CARDIO -> "${set.optInt("seconds") / 60} Min. · ${set.optDouble("distanceKm")} km"
-                            ExerciseKind.TIMED, ExerciseKind.AMRAP -> "${set.optInt("seconds")} Sekunden"
+                Spacer(Modifier.height(12.dp))
+                Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                    Surface(Modifier.weight(1f), color = Panel2, shape = RoundedCornerShape(16.dp)) {
+                        Column(Modifier.padding(12.dp)) {
+                            DisplayTitle("${result.optInt("setCount")}", ndot, fontSize = 28.sp)
+                            Text("SÄTZE GESAMT", color = Muted, fontSize = 9.sp)
                         }
-                        Row(Modifier.fillMaxWidth().padding(vertical = 6.dp)) {
-                            Text("Satz ${j + 1}", color = Muted, fontSize = 12.sp, modifier = Modifier.weight(1f))
-                            Text(text, color = White, fontSize = 13.sp)
+                    }
+                    Surface(Modifier.weight(1f), color = Panel2, shape = RoundedCornerShape(16.dp)) {
+                        Column(Modifier.padding(12.dp)) {
+                            DisplayTitle("${items.length()}", ndot, fontSize = 28.sp)
+                            Text("ÜBUNGEN", color = Muted, fontSize = 9.sp)
+                        }
+                    }
+                    Surface(Modifier.weight(1f), color = Panel2, shape = RoundedCornerShape(16.dp)) {
+                        Column(Modifier.padding(12.dp)) {
+                            Text(if (result.optBoolean("legacy")) "–" else "%02d:%02d".format(Locale.GERMAN, elapsed / 60, elapsed % 60),
+                                color = White, fontSize = 21.sp)
+                            Text("DAUER", color = Muted, fontSize = 9.sp)
                         }
                     }
                 }
-                TextButton(onClick = onClose, modifier = Modifier.align(Alignment.End)) { Text("Schließen", color = White) }
+                if (result.optBoolean("legacy")) Text("${result.optString("legacyDate")} · Ältere Tagesaufzeichnung ohne genaue Sitzungsdauer.",
+                    color = Muted, fontSize = 10.sp, modifier = Modifier.padding(top = 8.dp))
+                Spacer(Modifier.height(12.dp))
+                Column(Modifier.weight(1f).fillMaxWidth().verticalScroll(rememberScrollState()),
+                    verticalArrangement = Arrangement.spacedBy(10.dp)) {
+                    if (items.length() == 0) Text("Keine Sätze erfasst.", color = Muted, fontSize = 13.sp)
+                    for (i in 0 until items.length()) {
+                        val item = items.getJSONObject(i)
+                        val sets = item.optJSONArray("sets") ?: JSONArray()
+                        val kind = runCatching { ExerciseKind.valueOf(item.optString("kind")) }.getOrDefault(ExerciseKind.WEIGHT)
+                        val groups = groupedWorkoutSets(sets, kind)
+                        val reps = (0 until sets.length()).sumOf { sets.optJSONObject(it)?.optInt("reps") ?: 0 }
+                        key(result.optString("runId"), i) {
+                            var showIndividual by remember { mutableStateOf(false) }
+                            Surface(color = Panel2, shape = RoundedCornerShape(20.dp), modifier = Modifier.fillMaxWidth()) {
+                                Column(Modifier.padding(14.dp)) {
+                                    Text(item.optString("name"), color = White, fontSize = 16.sp)
+                                    Text("${sets.length()} ${if (sets.length() == 1) "Satz" else "Sätze"}" +
+                                        if (kind in listOf(ExerciseKind.WEIGHT, ExerciseKind.BODYWEIGHT)) " · $reps Wiederholungen gesamt" else "",
+                                        color = Muted, fontSize = 11.sp)
+                                    Spacer(Modifier.height(8.dp))
+                                    groups.forEach { group ->
+                                        Row(Modifier.fillMaxWidth().padding(vertical = 4.dp), verticalAlignment = Alignment.CenterVertically) {
+                                            Text("${group.count} ${if (group.count == 1) "Satz" else "Sätze"}", color = Red,
+                                                fontSize = 12.sp, modifier = Modifier.width(64.dp))
+                                            Text(group.label, color = White, fontSize = 14.sp, modifier = Modifier.weight(1f))
+                                        }
+                                    }
+                                    TextButton(onClick = { showIndividual = !showIndividual }, contentPadding = PaddingValues(0.dp)) {
+                                        Text(if (showIndividual) "Einzelsätze ausblenden ⌃" else "Einzelsätze anzeigen ⌄", color = Muted, fontSize = 11.sp)
+                                    }
+                                    if (showIndividual) {
+                                        HorizontalDivider(color = Color(0xFF353535))
+                                        for (j in 0 until sets.length()) {
+                                            val set = sets.optJSONObject(j) ?: continue
+                                            Row(Modifier.fillMaxWidth().padding(vertical = 6.dp)) {
+                                                Text("${j + 1}.", color = Muted, fontSize = 11.sp, modifier = Modifier.width(30.dp))
+                                                Text(workoutSetLabel(set, kind), color = White, fontSize = 12.sp)
+                                            }
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+                Spacer(Modifier.height(12.dp))
+                Button(onClick = onClose, modifier = Modifier.fillMaxWidth().height(48.dp),
+                    shape = RoundedCornerShape(16.dp), colors = ButtonDefaults.buttonColors(containerColor = White, contentColor = Bg)) {
+                    Text("FERTIG")
+                }
             }
         }
     }
@@ -4310,7 +4440,7 @@ private fun WorkoutSheetDialog(
     val maxHeight = androidx.compose.ui.platform.LocalConfiguration.current.screenHeightDp.dp * .88f
     val currentSets = logs.filter { it.workoutId == workout.id && it.sessionId == sessionId }
     Dialog(onDismissRequest = onDismiss, properties = DialogProperties(usePlatformDefaultWidth = false)) {
-        Surface(Modifier.fillMaxWidth().padding(horizontal = 14.dp).heightIn(max = maxHeight),
+        Surface(Modifier.fillMaxWidth().padding(horizontal = 14.dp).height(maxHeight),
             color = Bg, shape = RoundedCornerShape(28.dp)) {
             Column(Modifier.padding(18.dp)) {
                 Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
@@ -4343,7 +4473,7 @@ private fun WorkoutSheetDialog(
                 Text("Antippen zum Aufklappen · Gedrückt halten und ziehen zum Sortieren",
                     color = Muted, fontSize = 10.sp, modifier = Modifier.padding(top = 9.dp, bottom = 10.dp))
                 Column(
-                    Modifier.weight(1f, fill = false).fillMaxWidth()
+                    Modifier.weight(1f).fillMaxWidth()
                         .onGloballyPositioned { coords ->
                             viewportTop = coords.positionInRoot().y
                             viewportBottom = viewportTop + coords.size.height
@@ -4453,76 +4583,95 @@ private fun WorkoutTemplateManager(
     onRename: (String, String) -> Unit,
     onDelete: (String) -> Unit
 ) {
+    var tab by remember { mutableIntStateOf(if (templates.isNotEmpty()) 0 else 1) }
     var editingKey by remember { mutableStateOf<String?>(null) }
     var editedName by remember { mutableStateOf("") }
     var deleteKey by remember { mutableStateOf<String?>(null) }
+    val height = androidx.compose.ui.platform.LocalConfiguration.current.screenHeightDp.dp * .85f
     Dialog(onDismissRequest = onDismiss, properties = DialogProperties(usePlatformDefaultWidth = false)) {
-        Surface(Modifier.fillMaxWidth().padding(16.dp), color = Panel, shape = RoundedCornerShape(28.dp)) {
+        Surface(Modifier.fillMaxWidth().padding(16.dp).height(height), color = Panel, shape = RoundedCornerShape(28.dp)) {
             Column(Modifier.padding(18.dp)) {
-                Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
-                    Text("TRAINING PLANEN", color = Red, fontSize = 10.sp, fontFamily = FontFamily.Default,
-                        modifier = Modifier.weight(1f))
-                    IconButton(onClick = onDismiss) { Text("✕", color = White) }
-                }
+                Text("WÄHLEN & VERWALTEN", color = Red, fontSize = 10.sp)
                 DisplayTitle("VORLAGEN", ndot, fontSize = 28.sp)
-                Text("Vorlage antippen, prüfen und Workout anlegen.", color = Muted, fontSize = 12.sp)
                 Spacer(Modifier.height(12.dp))
-                Column(Modifier.heightIn(max = 440.dp).verticalScroll(rememberScrollState()),
-                    verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                    SectionLabel("STANDARD", topPadding = 4.dp, bottomPadding = 4.dp)
-                    workoutPresets.forEach { preset ->
-                        Surface(color = Panel2, shape = RoundedCornerShape(18.dp),
-                            modifier = Modifier.fillMaxWidth().clickable { onStandard(preset) }) {
-                            Row(Modifier.padding(14.dp), verticalAlignment = Alignment.CenterVertically) {
-                                Column(Modifier.weight(1f)) {
-                                    Text(preset.title, color = White, fontSize = 16.sp)
-                                    Text("${preset.exerciseNames.size} Übungen · ${preset.kind.name.replace('_', ' ')}" +
-                                        if (preset.minutes > 0) " · ${preset.minutes} Min." else "", color = Muted, fontSize = 10.sp)
-                                    Text(preset.exerciseNames.joinToString(" · "), color = Muted, fontSize = 10.sp,
-                                        maxLines = 2, overflow = TextOverflow.Ellipsis)
-                                }
-                                Text("›", color = White, fontSize = 23.sp)
+                Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                    ChoiceChip("Meine (${templates.size})", tab == 0, Modifier.weight(1f)) { tab = 0 }
+                    ChoiceChip("Standard (${workoutPresets.size})", tab == 1, Modifier.weight(1f)) { tab = 1 }
+                }
+                Spacer(Modifier.height(12.dp))
+                Column(Modifier.weight(1f).fillMaxWidth().verticalScroll(rememberScrollState()),
+                    verticalArrangement = Arrangement.spacedBy(10.dp)) {
+                    if (tab == 0) {
+                        if (templates.isEmpty()) {
+                            Surface(color = Panel2, shape = RoundedCornerShape(18.dp)) {
+                                Text("Noch keine eigenen Vorlagen. Speichere ein vorbereitetes Workout über das Lesezeichen-Symbol als Vorlage.",
+                                    color = Muted, fontSize = 13.sp, modifier = Modifier.padding(16.dp))
                             }
                         }
-                    }
-                    SectionLabel("MEINE VORLAGEN", topPadding = 14.dp, bottomPadding = 4.dp)
-                    if (templates.isEmpty()) Text("Eigene Vorlagen kannst du im Workout speichern.", color = Muted, fontSize = 12.sp)
-                    templates.forEach { (key, obj) ->
-                        Surface(color = Panel2, shape = RoundedCornerShape(18.dp), modifier = Modifier.fillMaxWidth()) {
-                            Column(Modifier.padding(12.dp)) {
-                                Row(verticalAlignment = Alignment.CenterVertically) {
-                                    Column(Modifier.weight(1f).clickable { onPersonal(key) }) {
-                                        Text(obj.optString("name"), color = White, fontSize = 16.sp)
-                                        Text("${obj.optJSONArray("sourceIds")?.length() ?: 0} Übungen · ${obj.optString("kind").replace('_', ' ')}",
-                                            color = Muted, fontSize = 10.sp)
+                        templates.forEach { (key, obj) ->
+                            Surface(color = Panel2, shape = RoundedCornerShape(20.dp), modifier = Modifier.fillMaxWidth()) {
+                                Column(Modifier.padding(14.dp)) {
+                                    Text(obj.optString("name"), color = White, fontSize = 17.sp)
+                                    Text("${obj.optJSONArray("sourceIds")?.length() ?: 0} Übungen · ${obj.optString("kind").replace('_', ' ')}",
+                                        color = Muted, fontSize = 11.sp)
+                                    if (editingKey == key) {
+                                        Spacer(Modifier.height(8.dp))
+                                        OutlinedTextField(editedName, { editedName = it.take(48) }, label = { Text("Vorlagenname") },
+                                            singleLine = true, modifier = Modifier.fillMaxWidth())
+                                        Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.End) {
+                                            TextButton(onClick = { editingKey = null }) { Text("Abbrechen") }
+                                            TextButton(enabled = editedName.isNotBlank(), onClick = {
+                                                onRename(key, editedName.trim()); editingKey = null
+                                            }) { Text("Speichern", color = White) }
+                                        }
+                                    } else {
+                                        Spacer(Modifier.height(10.dp))
+                                        Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
+                                            Button(onClick = { onPersonal(key) }, modifier = Modifier.weight(1f),
+                                                shape = RoundedCornerShape(12.dp),
+                                                colors = ButtonDefaults.buttonColors(containerColor = White, contentColor = Bg)) {
+                                                Text("Verwenden", fontSize = 12.sp)
+                                            }
+                                            IconButton(onClick = { editingKey = key; editedName = obj.optString("name") },
+                                                modifier = Modifier.semantics { contentDescription = "Vorlage umbenennen" }) {
+                                                WorkoutActionIcon(WorkoutAction.EDIT)
+                                            }
+                                            IconButton(onClick = { deleteKey = key },
+                                                modifier = Modifier.semantics { contentDescription = "Vorlage löschen" }) {
+                                                WorkoutActionIcon(WorkoutAction.DELETE, Red)
+                                            }
+                                        }
                                     }
-                                    IconButton(onClick = { editingKey = key; editedName = obj.optString("name") }) {
-                                        WorkoutActionIcon(WorkoutAction.EDIT)
-                                    }
-                                    IconButton(onClick = { deleteKey = key }) { WorkoutActionIcon(WorkoutAction.DELETE, Muted) }
                                 }
-                                if (editingKey == key) {
-                                    OutlinedTextField(editedName, { editedName = it.take(48) }, label = { Text("Vorlagenname") },
-                                        singleLine = true, modifier = Modifier.fillMaxWidth())
-                                    Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.End) {
-                                        TextButton(onClick = { editingKey = null }) { Text("Abbrechen") }
-                                        TextButton(enabled = editedName.isNotBlank(), onClick = {
-                                            onRename(key, editedName.trim()); editingKey = null
-                                        }) { Text("Speichern", color = White) }
+                            }
+                        }
+                    } else {
+                        Text("Mitgelieferte Vorlagen bleiben verfügbar. Eigene Vorlagen kannst du unter Meine löschen.", color = Muted, fontSize = 11.sp)
+                        workoutPresets.forEach { preset ->
+                            Surface(color = Panel2, shape = RoundedCornerShape(20.dp), modifier = Modifier.fillMaxWidth()) {
+                                Column(Modifier.padding(14.dp)) {
+                                    Text(preset.title, color = White, fontSize = 17.sp)
+                                    Text("${preset.exerciseNames.size} Übungen · ${preset.kind.name.replace('_', ' ')}" +
+                                        if (preset.minutes > 0) " · ${preset.minutes} Min." else "", color = Muted, fontSize = 11.sp)
+                                    Text(preset.exerciseNames.joinToString(" · "), color = Muted, fontSize = 11.sp,
+                                        modifier = Modifier.padding(top = 5.dp))
+                                    TextButton(onClick = { onStandard(preset) }, contentPadding = PaddingValues(0.dp)) {
+                                        Text("Vorlage verwenden →", color = White, fontSize = 12.sp)
                                     }
                                 }
                             }
                         }
                     }
                 }
+                TextButton(onClick = onDismiss, modifier = Modifier.align(Alignment.CenterHorizontally)) { Text("Schließen", color = White) }
             }
         }
     }
     deleteKey?.let { key ->
         AlertDialog(onDismissRequest = { deleteKey = null }, containerColor = Panel,
             title = { DisplayTitle("VORLAGE LÖSCHEN?", ndot, fontSize = 24.sp) },
-            text = { Text("Nur die Vorlage wird entfernt. Workouts und Trainingsdaten bleiben erhalten.", color = Muted) },
-            confirmButton = { TextButton(onClick = { onDelete(key); deleteKey = null }) { Text("Löschen", color = Red) } },
+            text = { Text("Nur diese Vorlage wird entfernt. Workouts und Trainingsdaten bleiben erhalten.", color = Muted) },
+            confirmButton = { TextButton(onClick = { onDelete(key); deleteKey = null }) { Text("Vorlage löschen", color = Red) } },
             dismissButton = { TextButton(onClick = { deleteKey = null }) { Text("Abbrechen") } })
     }
 }
@@ -6262,7 +6411,7 @@ private fun SetupScreen(
         )
         HorizontalDivider(color = Color(0xFF242424), modifier = Modifier.padding(top = 6.dp))
         Text(
-            "NPLANNER · VERSION 0.40",
+            "NPLANNER · VERSION 0.41",
             color = Color(0xFFB6B6B6),
             fontFamily = FontFamily.Default,
             fontSize = 10.sp,
