@@ -38,6 +38,7 @@ import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.pager.HorizontalPager
 import androidx.compose.foundation.pager.rememberPagerState
 import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.ScrollState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.KeyboardOptions
@@ -206,11 +207,13 @@ data class Workout(
     val exerciseIds: List<String> = emptyList(),
     val note: String = "",
     val kind: WorkoutKind = WorkoutKind.CLASSIC,
-    val durationSeconds: Int = 0
+    val durationSeconds: Int = 0,
+    val amrapTargets: Map<String, Int> = emptyMap()
 )
 
 private val LocalDotHeadings = compositionLocalOf { false }
 private val LocalClassicHeadings = compositionLocalOf<FontFamily> { FontFamily.Default }
+private val LocalPageScroll = compositionLocalOf<ScrollState?> { null }
 
 // ---------- Zeit- und Regel-Helfer ----------
 
@@ -774,7 +777,10 @@ class MainActivity : ComponentActivity() {
                     exerciseIds = ids,
                     note = o.optString("note", ""),
                     kind = runCatching { WorkoutKind.valueOf(o.optString("kind", "CLASSIC")) }.getOrDefault(WorkoutKind.CLASSIC),
-                    durationSeconds = o.optInt("durationSeconds", 0)
+                    durationSeconds = o.optInt("durationSeconds", 0),
+                    amrapTargets = o.optJSONObject("amrapTargets")?.let { targets ->
+                        targets.keys().asSequence().associateWith { targets.optInt(it, 1).coerceIn(1, 500) }
+                    } ?: emptyMap()
                 )
             }
         }
@@ -791,6 +797,7 @@ class MainActivity : ComponentActivity() {
                     .put("note", w.note)
                     .put("kind", w.kind.name)
                     .put("durationSeconds", w.durationSeconds)
+                    .put("amrapTargets", JSONObject().apply { w.amrapTargets.forEach { (id, reps) -> put(id, reps) } })
             )
         }
         prefs.edit().putString("workouts_v1", arr.toString()).apply()
@@ -1074,6 +1081,7 @@ class MainActivity : ComponentActivity() {
         }
 
         val pagerState = rememberPagerState(pageCount = { 4 })
+        val pageScrollStates = remember { List(4) { ScrollState(0) } }
         val scope = rememberCoroutineScope()
         var directTarget by remember { mutableStateOf<Int?>(null) }
         var overlayPage by remember { mutableIntStateOf(0) }
@@ -1103,6 +1111,7 @@ class MainActivity : ComponentActivity() {
 
         @Composable
         fun PageContent(p: Int) {
+            CompositionLocalProvider(LocalPageScroll provides pageScrollStates[p]) {
                     when (p) {
                         0 -> TodayScreen(
                             ndot = ndot,
@@ -1243,6 +1252,7 @@ class MainActivity : ComponentActivity() {
                             }
                         )
                     }
+            }
         }
 
         CompositionLocalProvider(LocalDotHeadings provides dotHeadings) {
@@ -1365,7 +1375,7 @@ private fun Screen(
         .statusBarsPadding()
         .padding(horizontal = 22.dp)
         .padding(top = if (compactHeader) 8.dp else 12.dp, bottom = if (compactHeader) 92.dp else 102.dp)
-    Column(if (scrollable) base.verticalScroll(rememberScrollState()) else base) {
+    Column(if (scrollable) base.verticalScroll(LocalPageScroll.current ?: rememberScrollState()) else base) {
         Row(verticalAlignment = Alignment.CenterVertically) {
             Box(Modifier.size(6.dp).background(Red, CircleShape))
             Spacer(Modifier.width(9.dp))
@@ -2675,13 +2685,30 @@ private fun TrainingScreen(
     var sessionStartedAt by remember { mutableStateOf(sessionPrefs.getLong("started_at", 0L)) }
     var showAddExistingExercise by remember { mutableStateOf(false) }
     var openWorkoutId by remember { mutableStateOf<String?>(null) }
+    var amrapWorkoutId by remember { mutableStateOf<String?>(sessionPrefs.getString("amrap_workout", null)) }
     fun beginWorkout(id: String) {
         activeWorkoutSessionId = id
         sessionStartedAt = System.currentTimeMillis()
         sessionPrefs.edit().putString("active_workout", id).putLong("started_at", sessionStartedAt).apply()
         openWorkoutId = id
+        if (workouts.firstOrNull { it.id == id }?.kind == WorkoutKind.AMRAP) {
+            val prefix = "amrap:$id:"
+            if (sessionPrefs.getBoolean(prefix + "finished", false)) {
+                val rounds = sessionPrefs.getInt(prefix + "rounds", 0)
+                val completed = sessionPrefs.getInt(prefix + "index", 0)
+                val archiveKey = "amrap_result:${System.currentTimeMillis()}:$id"
+                sessionPrefs.edit().putString(archiveKey, "$rounds:$completed").apply()
+                sessionPrefs.edit().remove(prefix + "finished").remove(prefix + "running")
+                    .remove(prefix + "index").remove(prefix + "rounds")
+                    .remove(prefix + "remaining").remove(prefix + "endAt").apply()
+            }
+            amrapWorkoutId = id
+            sessionPrefs.edit().putString("amrap_workout", id).apply()
+        }
     }
     fun finishWorkout() {
+        amrapWorkoutId = null
+        sessionPrefs.edit().remove("amrap_workout").apply()
         activeWorkoutSessionId = null
         sessionStartedAt = 0L
         sessionPrefs.edit().remove("active_workout").remove("started_at").apply()
@@ -3203,7 +3230,17 @@ private fun TrainingScreen(
         if (workout == null) {
             openWorkoutId = null
         } else {
-            WorkoutSheetDialog(
+            if (workout.kind == WorkoutKind.AMRAP && activeWorkoutSessionId == workout.id) {
+                AmrapLiveDialog(
+                    ndot = ndot,
+                    workout = workout,
+                    exercises = workout.exerciseIds.mapNotNull { id -> exercises.find { it.id == id } },
+                    prefs = sessionPrefs,
+                    onDismiss = { openWorkoutId = null },
+                    onFinish = { finishWorkout() },
+                    onHapticTick = onHapticTick
+                )
+            } else WorkoutSheetDialog(
                 ndot = ndot,
                 todayStr = todayStr,
                 workout = workout,
@@ -3283,18 +3320,27 @@ private fun TrainingScreen(
             isNew = true,
             onAddPresetExercises = { missing -> onImportExercises(missing, null) },
             onDismiss = { showNewWorkoutDialog = false },
-            onSave = { finalName, note, selectedIds, kind, durationSeconds ->
+            onSave = { finalName, note, selectedIds, kind, durationSeconds, targets ->
                 val created = Workout(
                     id = UUID.randomUUID().toString(),
                     name = finalName,
                     exerciseIds = selectedIds,
                     note = note,
                     kind = kind,
-                    durationSeconds = durationSeconds
+                    durationSeconds = durationSeconds,
+                    amrapTargets = targets
                 )
                 onCreateWorkout(created)
                 showNewWorkoutDialog = false
                 beginWorkout(created.id)
+                if (created.kind == WorkoutKind.AMRAP) {
+                    val prefix = "amrap:${created.id}:"
+                    sessionPrefs.edit().putInt(prefix + "index", 0).putInt(prefix + "rounds", 0)
+                        .putBoolean(prefix + "finished", false).putBoolean(prefix + "running", false)
+                        .putLong(prefix + "remaining", created.durationSeconds.coerceAtLeast(1) * 1000L).apply()
+                    amrapWorkoutId = created.id
+                    sessionPrefs.edit().putString("amrap_workout", created.id).apply()
+                }
             }
         )
     }
@@ -3313,14 +3359,15 @@ private fun TrainingScreen(
             isNew = false,
             onAddPresetExercises = { missing -> onImportExercises(missing, null) },
             onDismiss = { editingWorkout = null },
-            onSave = { finalName, note, selectedIds, kind, durationSeconds ->
+            onSave = { finalName, note, selectedIds, kind, durationSeconds, targets ->
                 onUpdateWorkout(
                     wToEdit.copy(
                         name = finalName,
                         note = note,
                         exerciseIds = selectedIds,
                         kind = kind,
-                        durationSeconds = durationSeconds
+                        durationSeconds = durationSeconds,
+                        amrapTargets = if (targets.isEmpty()) wToEdit.amrapTargets else targets
                     )
                 )
                 editingWorkout = null
@@ -3387,6 +3434,125 @@ private fun TrainingScreen(
                 showAiImportDialog = false
             }
         )
+    }
+}
+
+@Composable
+private fun AmrapLiveDialog(
+    ndot: FontFamily,
+    workout: Workout,
+    exercises: List<Exercise>,
+    prefs: android.content.SharedPreferences,
+    onDismiss: () -> Unit,
+    onFinish: () -> Unit,
+    onHapticTick: () -> Unit
+) {
+    val prefix = "amrap:${workout.id}:"
+    val durationMs = workout.durationSeconds.coerceAtLeast(1) * 1000L
+    var exerciseIndex by remember(workout.id) { mutableIntStateOf(prefs.getInt(prefix + "index", 0)) }
+    var rounds by remember(workout.id) { mutableIntStateOf(prefs.getInt(prefix + "rounds", 0)) }
+    var finished by remember(workout.id) { mutableStateOf(prefs.getBoolean(prefix + "finished", false)) }
+    var running by remember(workout.id) { mutableStateOf(prefs.getBoolean(prefix + "running", false)) }
+    var remainingMs by remember(workout.id) { mutableLongStateOf(prefs.getLong(prefix + "remaining", durationMs).coerceIn(0L, durationMs)) }
+    var endAt by remember(workout.id) { mutableLongStateOf(prefs.getLong(prefix + "endAt", 0L)) }
+    var now by remember { mutableLongStateOf(System.currentTimeMillis()) }
+    val count = exercises.size
+    val currentIndex = if (count > 0) exerciseIndex.coerceIn(0, count - 1) else 0
+    val timeLeft = if (running) (endAt - now).coerceAtLeast(0L) else remainingMs
+    val complete = finished || (running && timeLeft == 0L)
+
+    fun save() {
+        prefs.edit().putInt(prefix + "index", exerciseIndex).putInt(prefix + "rounds", rounds)
+            .putBoolean(prefix + "finished", finished).putBoolean(prefix + "running", running)
+            .putLong(prefix + "remaining", remainingMs).putLong(prefix + "endAt", endAt).apply()
+    }
+    LaunchedEffect(workout.id, running, endAt) {
+        while (running) {
+            now = System.currentTimeMillis()
+            if (now >= endAt) {
+                remainingMs = 0L
+                running = false
+                finished = true
+                save()
+                break
+            }
+            delay(150)
+        }
+    }
+    fun toggleTimer() {
+        if (complete) return
+        if (running) {
+            remainingMs = (endAt - System.currentTimeMillis()).coerceAtLeast(0L)
+            running = false
+        } else {
+            endAt = System.currentTimeMillis() + remainingMs
+            running = true
+        }
+        save()
+    }
+    fun nextExercise() {
+        if (!running || complete || count == 0 || System.currentTimeMillis() >= endAt) return
+        if (currentIndex == count - 1) { rounds++; exerciseIndex = 0 }
+        else exerciseIndex = currentIndex + 1
+        save()
+        onHapticTick()
+    }
+    fun undo() {
+        if (count == 0 || (rounds == 0 && currentIndex == 0)) return
+        if (currentIndex == 0) { rounds = (rounds - 1).coerceAtLeast(0); exerciseIndex = count - 1 }
+        else exerciseIndex = currentIndex - 1
+        save()
+    }
+    Dialog(onDismissRequest = onDismiss, properties = DialogProperties(usePlatformDefaultWidth = false)) {
+        Surface(Modifier.fillMaxWidth().padding(horizontal = 16.dp), color = Panel, shape = RoundedCornerShape(28.dp)) {
+            Column(Modifier.padding(20.dp), horizontalAlignment = Alignment.CenterHorizontally) {
+                Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween, verticalAlignment = Alignment.CenterVertically) {
+                    Text("AMRAP · LIVE", color = Red, fontSize = 11.sp, fontFamily = FontFamily.Monospace)
+                    TextButton(onClick = onDismiss) { Text("✕", color = Muted) }
+                }
+                DisplayTitle(workout.name, ndot, fontSize = 25.sp)
+                Spacer(Modifier.height(16.dp))
+                DisplayTitle("%02d:%02d".format(Locale.GERMAN, timeLeft / 60000L, (timeLeft / 1000L) % 60L), ndot, fontSize = 48.sp)
+                Text("VERBLEIBEND", color = Muted, fontSize = 10.sp, fontFamily = FontFamily.Monospace)
+                Spacer(Modifier.height(15.dp))
+                Text("$rounds VOLLSTÄNDIGE RUNDEN", color = White, fontSize = 14.sp)
+                Spacer(Modifier.height(16.dp))
+                Surface(Modifier.fillMaxWidth(), color = Panel2, shape = RoundedCornerShape(20.dp)) {
+                    Column(Modifier.padding(18.dp), horizontalAlignment = Alignment.CenterHorizontally) {
+                        if (count > 0) {
+                            val ex = exercises[currentIndex]
+                            Text("ÜBUNG ${currentIndex + 1} / $count", color = Muted, fontSize = 10.sp)
+                            DisplayTitle(ex.name.uppercase(Locale.GERMAN), ndot, fontSize = 25.sp)
+                            Text("${workout.amrapTargets[ex.id] ?: ex.targetReps.coerceAtLeast(1)} WIEDERHOLUNGEN", color = White, fontSize = 13.sp)
+                        } else Text("Bitte zuerst Übungen hinzufügen.", color = Muted)
+                    }
+                }
+                Spacer(Modifier.height(14.dp))
+                if (complete) {
+                    Text("ZEIT ABGELAUFEN", color = Red, fontSize = 13.sp)
+                } else {
+                    Button(onClick = { if (!running) toggleTimer() else nextExercise() }, enabled = count > 0,
+                        modifier = Modifier.fillMaxWidth().height(52.dp),
+                        colors = ButtonDefaults.buttonColors(containerColor = White, contentColor = Bg),
+                        shape = RoundedCornerShape(16.dp)) {
+                        Text(if (!running) "${if (remainingMs == durationMs) "STARTEN" else "FORTSETZEN"}" else "ÜBUNG ERLEDIGT  ✓")
+                    }
+                }
+                Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
+                    TextButton(onClick = { undo() }, enabled = !complete) { Text("↶ Rückgängig", color = Muted) }
+                    TextButton(onClick = { toggleTimer() }, enabled = !complete && remainingMs < durationMs) {
+                        Text(if (running) "Pause" else "Fortsetzen", color = White)
+                    }
+                }
+                TextButton(onClick = {
+                    if (running) remainingMs = (endAt - System.currentTimeMillis()).coerceAtLeast(0L)
+                    running = false
+                    finished = true
+                    save()
+                    onFinish()
+                }) { Text(if (complete) "Workout abschließen" else "Workout beenden", color = Red) }
+            }
+        }
     }
 }
 
@@ -3599,6 +3765,9 @@ private fun presetExercise(name: String): Exercise? {
 }
 
 private val workoutPresets = listOf(
+    WorkoutPreset("Dev-AMRAP", WorkoutKind.AMRAP, 2,
+        listOf("Liegestütze", "Kniebeugen", "Klimmzüge"),
+        "2-Minuten-Test: 3 Liegestütze, 5 Kniebeugen, 2 Klimmzüge pro Runde."),
     WorkoutPreset("Cindy", WorkoutKind.AMRAP, 20,
         listOf("Klimmzüge", "Liegestütze", "Kniebeugen"),
         "20 Min. AMRAP: je Runde 5 Klimmzüge, 10 Liegestütze, 15 Kniebeugen."),
@@ -3627,7 +3796,7 @@ private fun WorkoutEditorDialog(
     isNew: Boolean,
     onAddPresetExercises: (List<Exercise>) -> Unit,
     onDismiss: () -> Unit,
-    onSave: (String, String, List<String>, WorkoutKind, Int) -> Unit
+    onSave: (String, String, List<String>, WorkoutKind, Int, Map<String, Int>) -> Unit
 ) {
     val context = LocalContext.current
     val haptic = LocalHapticFeedback.current
@@ -3640,6 +3809,8 @@ private fun WorkoutEditorDialog(
     var showPresetPicker by remember { mutableStateOf(false) }
     var showExercisePicker by remember { mutableStateOf(false) }
     var presetNotice by remember { mutableStateOf("") }
+    var selectedPresetName by remember { mutableStateOf("") }
+    var selectedPresetTargets by remember { mutableStateOf<Map<String, Int>>(emptyMap()) }
 
     // Wenn noch kein eigener Name eingegeben wurde, passt sich der Vorschlag an die gewaehlten Uebungen an
     LaunchedEffect(selectedIds) {
@@ -3730,7 +3901,8 @@ private fun WorkoutEditorDialog(
                                 allExercises.filter { it.id in selectedIds }
                             )
                             val finalName = name.trim().ifBlank { fallback }
-                            val orderedIds = allExercises.filter { it.id in selectedIds }.map { it.id }
+                            val orderedIds = allExercises.filter { it.id in selectedIds }.map { it.id } +
+                                selectedIds.filterNot { id -> allExercises.any { it.id == id } }
                             onSave(finalName, note.trim(), orderedIds, workoutKind,
                                 if (workoutKind == WorkoutKind.CLASSIC) 0 else (durationText.toIntOrNull() ?: 20).coerceIn(1, 480) * 60)
                         }
@@ -3749,6 +3921,7 @@ private fun WorkoutEditorDialog(
                         Surface(color = Panel2, shape = RoundedCornerShape(15.dp),
                             modifier = Modifier.fillMaxWidth().clickable {
                                 workoutKind = preset.kind
+                                selectedPresetName = preset.title
                                 durationText = (preset.minutes.takeIf { it > 0 } ?: 20).toString()
                                 name = preset.title
                                 nameManuallyEdited = true
@@ -3764,6 +3937,16 @@ private fun WorkoutEditorDialog(
                                         ?: missing.firstOrNull { it.name.equals(n, ignoreCase = true) }?.id
                                 }
                                 selectedIds = selected.toSet()
+                                val reps = when (preset.title) {
+                                    "Cindy" -> mapOf("Klimmzüge" to 5, "Liegestütze" to 10, "Kniebeugen" to 15)
+                                    "Dev-AMRAP" -> mapOf("Liegestütze" to 3, "Kniebeugen" to 5, "Klimmzüge" to 2)
+                                    else -> emptyMap()
+                                }
+                                selectedPresetTargets = preset.exerciseNames.mapNotNull { n ->
+                                    val id = existing[n.lowercase(Locale.GERMAN)]?.id
+                                        ?: missing.firstOrNull { it.name.equals(n, ignoreCase = true) }?.id
+                                    if (id != null && reps[n] != null) id to reps.getValue(n) else null
+                                }.toMap()
                                 presetNotice = "${selected.size}/${preset.exerciseNames.size} Übungen übernommen."
                                 showPresetPicker = false
                             }) {
@@ -4264,6 +4447,8 @@ private fun NewExerciseDialog(
     var copiedMediaPath by remember { mutableStateOf("") }
     var mediaUrl by remember { mutableStateOf("") }
     var mediaUrlIsVideo by remember { mutableStateOf(true) }
+    var showExerciseDetails by remember { mutableStateOf(false) }
+    var showExerciseMedia by remember { mutableStateOf(false) }
     var copiedMediaIsVideo by remember { mutableStateOf(false) }
 
     val mediaPicker = rememberLauncherForActivityResult(
@@ -4336,8 +4521,7 @@ private fun NewExerciseDialog(
                         ExerciseKind.WEIGHT to "Gewicht",
                         ExerciseKind.BODYWEIGHT to "Körpergewicht",
                         ExerciseKind.TIMED to "Zeit",
-                        ExerciseKind.CARDIO to "Cardio",
-                        ExerciseKind.AMRAP to "AMRAP"
+                        ExerciseKind.CARDIO to "Cardio"
                     ).forEach { (k, label) ->
                         ChoiceChip(label, kind == k, Modifier.width(115.dp)) {
                             kind = k
@@ -4428,15 +4612,29 @@ private fun NewExerciseDialog(
                 }
 
                 Spacer(Modifier.height(10.dp))
-                OutlinedTextField(
-                    value = description,
-                    onValueChange = { description = it.take(400) },
-                    label = { Text("Beschreibung & Ausführungshinweise") },
-                    minLines = 2,
-                    maxLines = 4,
-                    modifier = Modifier.fillMaxWidth()
-                )
-
+                  Spacer(Modifier.height(10.dp))
+                  Surface(color = Panel2, shape = RoundedCornerShape(16.dp),
+                      modifier = Modifier.fillMaxWidth().clickable { showExerciseDetails = !showExerciseDetails }) {
+                      Row(Modifier.padding(14.dp), verticalAlignment = Alignment.CenterVertically) {
+                          Text("BESCHREIBUNG & HINWEISE", color = White, fontSize = 12.sp, modifier = Modifier.weight(1f))
+                          Text(if (showExerciseDetails) "⌃" else "›", color = Muted)
+                      }
+                  }
+                  if (showExerciseDetails) {
+                      Spacer(Modifier.height(8.dp))
+                      OutlinedTextField(value = description, onValueChange = { description = it.take(400) },
+                          label = { Text("Beschreibung & Ausführung") }, minLines = 2, maxLines = 4,
+                          modifier = Modifier.fillMaxWidth())
+                  }
+                  Spacer(Modifier.height(8.dp))
+                  Surface(color = Panel2, shape = RoundedCornerShape(16.dp),
+                      modifier = Modifier.fillMaxWidth().clickable { showExerciseMedia = !showExerciseMedia }) {
+                      Row(Modifier.padding(14.dp), verticalAlignment = Alignment.CenterVertically) {
+                          Text("MEDIEN / LINKS", color = White, fontSize = 12.sp, modifier = Modifier.weight(1f))
+                          Text(if (showExerciseMedia) "⌃" else "›", color = Muted)
+                      }
+                  }
+                  if (showExerciseMedia) {
                 SectionLabel("FOTO ODER VIDEO", topPadding = 16.dp, bottomPadding = 8.dp)
                 Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                     ChoiceChip(
@@ -4470,6 +4668,7 @@ private fun NewExerciseDialog(
                 if (mediaUrl.isNotBlank() && validatedMediaUrl(mediaUrl) == null) {
                     Text("Bitte einen gültigen HTTPS-Link eingeben.", color = Red, fontSize = 11.sp)
                 }
+                  }
                 Spacer(Modifier.height(18.dp))
                 Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.End) {
                     TextButton(onClick = onDismiss) { Text("Abbrechen") }
@@ -5145,7 +5344,7 @@ private fun SetupScreen(
         )
         HorizontalDivider(color = Color(0xFF242424), modifier = Modifier.padding(top = 6.dp))
         Text(
-            "NPLANNER · VERSION 0.31",
+            "NPLANNER · VERSION 0.32",
             color = Color(0xFFB6B6B6),
             fontFamily = FontFamily.Monospace,
             fontSize = 10.sp,
