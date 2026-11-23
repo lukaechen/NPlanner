@@ -1088,28 +1088,36 @@ class MainActivity : ComponentActivity() {
         val pagerState = rememberPagerState(pageCount = { 4 })
         val pageScrollStates = remember { List(4) { ScrollState(0) } }
         val scope = rememberCoroutineScope()
+        var pageOrder by remember { mutableStateOf(listOf(0, 1, 2, 3)) }
         var directTarget by remember { mutableStateOf<Int?>(null) }
-        var overlayPage by remember { mutableIntStateOf(0) }
-        var directSwitching by remember { mutableStateOf(false) }
-        var directSource by remember { mutableIntStateOf(0) }
-        val directProgress = remember { Animatable(0f) }
+        var navigationJob by remember { mutableStateOf<kotlinx.coroutines.Job?>(null) }
 
         fun selectPage(target: Int) {
-            if (target !in 0..3 || directSwitching || target == pagerState.currentPage) return
-            triggerHaptic(context, haptic, HapticStyle.TICK)
-            directSource = pagerState.currentPage
-            directTarget = target
-            directSwitching = true
-            scope.launch {
+            if (target !in 0..3) return
+            if (navigationJob?.isActive != true && pageOrder[pagerState.currentPage] == target) return
+            val previous = navigationJob
+            navigationJob = scope.launch {
+                previous?.cancel()
+                previous?.join()
+                val source = pagerState.currentPage
+                if (source == target) return@launch
+                directTarget = target
+                val adjacent = source + if (target > source) 1 else -1
+                // Only source and target can become visible, even for Today -> Settings.
+                pageOrder = listOf(0, 1, 2, 3).toMutableList().apply {
+                    this[adjacent] = target
+                    this[target] = adjacent
+                }
                 try {
-                    directProgress.snapTo(0f)
-                    // Pager jumps behind the overlay. The user only sees source and target.
-                    pagerState.scrollToPage(target)
-                    directProgress.animateTo(1f, tween(220, easing = FastOutSlowInEasing))
+                    pagerState.animateScrollToPage(adjacent,
+                        animationSpec = tween(220, easing = FastOutSlowInEasing))
                 } finally {
-                    directTarget = null
-                    directSwitching = false
-                    directProgress.snapTo(0f)
+                    val logicalPage = pageOrder[pagerState.currentPage]
+                    androidx.compose.runtime.snapshots.Snapshot.withMutableSnapshot {
+                        pageOrder = listOf(0, 1, 2, 3)
+                        pagerState.requestScrollToPage(logicalPage)
+                        directTarget = null
+                    }
                 }
             }
         }
@@ -1264,24 +1272,12 @@ class MainActivity : ComponentActivity() {
             Box(Modifier.fillMaxSize().background(Bg)) {
                 HorizontalPager(
                     state = pagerState,
+                    key = { slot -> pageOrder[slot] },
                     beyondViewportPageCount = 1,
-                    userScrollEnabled = !directSwitching,
+                    userScrollEnabled = directTarget == null,
                     modifier = Modifier.fillMaxSize()
-                ) { p ->
-                    PageContent(p)
-                }
-                directTarget?.let { target ->
-                    val forward = target > directSource
-                    BoxWithConstraints(Modifier.fillMaxSize().background(Bg)) {
-                        val widthPx = with(LocalDensity.current) { maxWidth.toPx() }
-                        val shift = directProgress.value * widthPx
-                        Box(Modifier.fillMaxSize().graphicsLayer {
-                            translationX = if (forward) -shift else shift
-                        }) { PageContent(directSource) }
-                        Box(Modifier.fillMaxSize().graphicsLayer {
-                            translationX = if (forward) widthPx - shift else -widthPx + shift
-                        }) { PageContent(target) }
-                    }
+                ) { slot ->
+                    PageContent(pageOrder[slot])
                 }
                 GlyphNav(
                     pagerState = pagerState,
@@ -2765,8 +2761,11 @@ private fun TrainingScreen(
     var activeExercise by remember { mutableStateOf<Exercise?>(null) }
     var showNewWorkoutDialog by remember { mutableStateOf(false) }
     var showTemplateManager by remember { mutableStateOf(false) }
+    var requestedStandardTemplate by remember { mutableStateOf<String?>(null) }
+    var requestedPersonalTemplate by remember { mutableStateOf<String?>(null) }
+    var detailWorkoutId by remember { mutableStateOf<String?>(null) }
     var templateRevision by remember { mutableIntStateOf(0) }
-    val templates = remember(templateRevision) {
+    val templates = remember(templateRevision, showTemplateManager) {
         resultPrefs.all.filterKeys { it.startsWith("workout_template:") }
             .mapNotNull { (key, value) -> runCatching { key to JSONObject(value as String) }.getOrNull() }
             .sortedBy { it.second.optString("name").lowercase(Locale.GERMAN) }
@@ -2888,6 +2887,8 @@ private fun TrainingScreen(
                         }
                     TextButton(onClick = {
                         onHapticTick()
+                        requestedStandardTemplate = null
+                        requestedPersonalTemplate = null
                         showNewWorkoutDialog = true
                     }) {
                         Text("+ WORKOUT", color = White, fontFamily = FontFamily.Monospace, fontSize = 11.sp, letterSpacing = 1.4.sp)
@@ -2903,7 +2904,9 @@ private fun TrainingScreen(
                             .fillMaxWidth()
                             .clickable {
                                 onHapticTick()
-                                showNewWorkoutDialog = true
+                                requestedStandardTemplate = null
+                        requestedPersonalTemplate = null
+                        showNewWorkoutDialog = true
                             }
                     ) {
                         Column(Modifier.padding(22.dp)) {
@@ -3160,6 +3163,7 @@ private fun TrainingScreen(
                                     .fillMaxWidth()
                                     .clickable {
                                         onHapticTick()
+                                        detailWorkoutId = null
                                         activeExercise = ex
                                     }
                             ) {
@@ -3202,7 +3206,7 @@ private fun TrainingScreen(
             // ================= UNTERSEITE 2: REKORDE (PRs) =================
             else -> {
                 val records = remember(exercises, logs) {
-                    exercises.mapNotNull { ex ->
+                    exercises.filter { it.kind != ExerciseKind.AMRAP }.mapNotNull { ex ->
                         val exLogs = logs.filter { it.exerciseId == ex.id }
                         bestRecordText(ex, exLogs)?.let { pr -> Triple(ex, pr.first, pr.second) }
                     }
@@ -3235,65 +3239,38 @@ private fun TrainingScreen(
 
                 val amrapBests = amrapResults.groupBy { it.optString("signature") }
                     .values.mapNotNull { group -> group.maxByOrNull { it.optInt("score") } }
-                if (amrapBests.isNotEmpty()) {
-                    SectionLabel("AMRAP-REKORDE", topPadding = 12.dp, bottomPadding = 10.dp)
-                    amrapBests.forEach { result -> AmrapResultCard(result, ndot) { selectedAmrapResult = result } }
-                    Text("Bester Durchgang je Workout-Konfiguration. Vorzeitig beendete Einheiten bleiben entsprechend gekennzeichnet.", color = Muted, fontSize = 11.sp)
-                }
-                SectionLabel("PERSÖNLICHE BESTLEISTUNGEN", topPadding = 20.dp, bottomPadding = 10.dp)
-
-                if (records.isEmpty() && amrapBests.isEmpty()) {
-                    Surface(color = Panel, shape = RoundedCornerShape(22.dp), modifier = Modifier.fillMaxWidth()) {
-                        Column(Modifier.padding(18.dp)) {
-                            Text("Noch keine Rekorde eingetragen", color = White, fontSize = 14.sp, fontWeight = FontWeight.Medium)
-                            Spacer(Modifier.height(4.dp))
-                            Text(
-                                "Öffne ein Workout und trage einen Satz bei einer Übung ein – deine Bestleistung erscheint automatisch hier.",
-                                color = Muted,
-                                fontSize = 12.sp,
-                                lineHeight = 17.sp
-                            )
-                        }
-                    }
-                } else {
-                    Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
-                        records.forEach { (ex, prValue, prDate) ->
-                            Surface(
-                                color = Panel,
-                                shape = RoundedCornerShape(22.dp),
-                                modifier = Modifier
-                                    .fillMaxWidth()
-                                    .clickable {
-                                        onHapticTick()
-                                        activeExercise = ex
-                                    }
-                            ) {
-                                Row(
-                                    Modifier.padding(horizontal = 18.dp, vertical = 15.dp),
-                                    verticalAlignment = Alignment.CenterVertically
-                                ) {
+                val strength = records.filter { it.first.kind in listOf(ExerciseKind.WEIGHT, ExerciseKind.BODYWEIGHT, ExerciseKind.TIMED) }
+                val cardio = records.filter { it.first.kind == ExerciseKind.CARDIO }
+                @Composable
+                fun RecordGroup(title: String, entries: List<Triple<Exercise, String, String>>) {
+                    SectionLabel(title, topPadding = 18.dp, bottomPadding = 10.dp)
+                    if (entries.isEmpty()) Text("Noch keine Bestleistung gespeichert.", color = Muted, fontSize = 12.sp)
+                    Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                        entries.sortedBy { it.first.name.lowercase(Locale.GERMAN) }.forEach { (ex, value, day) ->
+                            Surface(color = Panel, shape = RoundedCornerShape(20.dp), modifier = Modifier.fillMaxWidth().clickable {
+                                detailWorkoutId = null
+                                activeExercise = ex
+                            }) {
+                                Row(Modifier.padding(16.dp), verticalAlignment = Alignment.CenterVertically) {
+                                    ExerciseKindIcon(ex.kind)
+                                    Spacer(Modifier.width(12.dp))
                                     Column(Modifier.weight(1f)) {
-                                        Text(ex.name, color = White, fontSize = 16.sp, fontWeight = FontWeight.Medium)
-                                        Spacer(Modifier.height(3.dp))
-                                        Text(
-                                            "${ex.muscle} · $prDate",
-                                            color = Muted,
-                                            fontFamily = FontFamily.Monospace,
-                                            fontSize = 10.sp
-                                        )
+                                        Text(ex.name, color = White, fontSize = 15.sp)
+                                        Text(day, color = Muted, fontSize = 10.sp, fontFamily = FontFamily.Monospace)
                                     }
-                                    Text(
-                                        prValue,
-                                        color = Red,
-                                        fontFamily = FontFamily.Monospace,
-                                        fontSize = 15.sp,
-                                        fontWeight = FontWeight.Medium
-                                    )
+                                    Text(value, color = Red, fontSize = 14.sp, fontFamily = FontFamily.Monospace)
                                 }
                             }
                         }
                     }
                 }
+                RecordGroup("01  KRAFTTRAINING", strength)
+                RecordGroup("02  CARDIO", cardio)
+                SectionLabel("03  AMRAP", topPadding = 18.dp, bottomPadding = 10.dp)
+                if (amrapBests.isEmpty()) Text("Noch keine AMRAP-Bestleistung gespeichert.", color = Muted, fontSize = 12.sp)
+                amrapBests.forEach { result -> AmrapResultCard(result, ndot) { selectedAmrapResult = result } }
+                if (amrapBests.isNotEmpty()) Text("Vergleich je gleicher Workout-Konfiguration. Vorzeitig beendete Einheiten sind gekennzeichnet.",
+                    color = Muted, fontSize = 10.sp)
             }
         }
     }
@@ -3334,6 +3311,7 @@ private fun TrainingScreen(
                 onAddExistingExercise = { showAddExistingExercise = true },
                 onSelectExercise = { ex ->
                     onHapticTick()
+                    detailWorkoutId = workout.id
                     activeExercise = ex
                 },
                 onAddNewExercise = {
@@ -3401,35 +3379,30 @@ private fun TrainingScreen(
     }
 
     if (showTemplateManager) {
-        AlertDialog(
-            onDismissRequest = { showTemplateManager = false },
-            containerColor = Panel, shape = RoundedCornerShape(26.dp),
-            title = { DisplayTitle("MEINE VORLAGEN", ndot, fontSize = 24.sp) },
-            text = {
-                Column(Modifier.heightIn(max = 390.dp).verticalScroll(rememberScrollState()),
-                    verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                    if (templates.isEmpty()) Text("Noch keine eigenen Vorlagen gespeichert.", color = Muted, fontSize = 12.sp)
-                    templates.forEach { (key, obj) ->
-                        var editName by remember(key) { mutableStateOf(obj.optString("name")) }
-                        Surface(color = Panel2, shape = RoundedCornerShape(16.dp)) {
-                            Column(Modifier.padding(12.dp)) {
-                                OutlinedTextField(editName, { editName = it.take(48) },
-                                    label = { Text("Vorlagenname") }, singleLine = true, modifier = Modifier.fillMaxWidth())
-                                Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.End) {
-                                    TextButton(enabled = editName.isNotBlank(), onClick = {
-                                        resultPrefs.edit().putString(key, obj.put("name", editName.trim()).toString()).apply()
-                                        templateRevision++
-                                    }) { Text("Speichern", color = White) }
-                                    TextButton(onClick = {
-                                        resultPrefs.edit().remove(key).apply(); templateRevision++
-                                    }) { WorkoutActionIcon(WorkoutAction.DELETE, Red) }
-                                }
-                            }
-                        }
+        WorkoutTemplateManager(
+            ndot = ndot, templates = templates,
+            onDismiss = { showTemplateManager = false },
+            onStandard = { preset ->
+                requestedStandardTemplate = preset.title
+                requestedPersonalTemplate = null
+                showTemplateManager = false
+                showNewWorkoutDialog = true
+            },
+            onPersonal = { key ->
+                requestedStandardTemplate = null
+                requestedPersonalTemplate = key
+                showTemplateManager = false
+                showNewWorkoutDialog = true
+            },
+            onRename = { key, name ->
+                resultPrefs.getString(key, null)?.let { raw ->
+                    runCatching { JSONObject(raw) }.getOrNull()?.let { obj ->
+                        resultPrefs.edit().putString(key, obj.put("name", name).toString()).apply()
+                        templateRevision++
                     }
                 }
             },
-            confirmButton = { TextButton(onClick = { showTemplateManager = false }) { Text("Schließen") } }
+            onDelete = { key -> resultPrefs.edit().remove(key).apply(); templateRevision++ }
         )
     }
 
@@ -3439,6 +3412,8 @@ private fun TrainingScreen(
             title = "NEUES WORKOUT",
             initialName = suggestWorkoutName(workouts, emptyList()),
             initialNote = "",
+            initialPresetName = requestedStandardTemplate,
+            initialPersonalKey = requestedPersonalTemplate,
             initialSelectedIds = emptySet(),
             initialKind = WorkoutKind.CLASSIC,
             initialDurationSeconds = 0,
@@ -3512,7 +3487,7 @@ private fun TrainingScreen(
         if (freshEx == null) {
             activeExercise = null
         } else {
-            val activeWorkoutObj = openWorkoutId?.let { wid -> workouts.find { it.id == wid } }
+            val activeWorkoutObj = detailWorkoutId?.let { wid -> workouts.find { it.id == wid } }
             ExerciseDetailDialog(
                 ndot = ndot,
                 today = today,
@@ -3522,7 +3497,14 @@ private fun TrainingScreen(
                 ),
                 logs = logs.filter { it.exerciseId == freshEx.id },
                 onDismiss = { activeExercise = null },
-                onLogSet = { log -> onLogSet(log.copy(workoutId = activeWorkoutObj?.id.orEmpty())) },
+                canLog = detailWorkoutId != null && detailWorkoutId == activeWorkoutSessionId &&
+                    workouts.any { it.id == detailWorkoutId && it.kind != WorkoutKind.AMRAP },
+                onLogSet = { log ->
+                    val id = detailWorkoutId
+                    if (id != null && id == activeWorkoutSessionId && workouts.any { it.id == id && it.kind != WorkoutKind.AMRAP }) {
+                        onLogSet(log.copy(workoutId = id))
+                    }
+                },
                 onRemoveFromWorkout = activeWorkoutObj?.let { w ->
                     {
                         onUpdateWorkout(w.copy(exerciseIds = w.exerciseIds.filterNot { it == freshEx.id }))
@@ -4200,11 +4182,97 @@ private val workoutPresets = listOf(
 )
 
 @Composable
+private fun WorkoutTemplateManager(
+    ndot: FontFamily,
+    templates: List<Pair<String, JSONObject>>,
+    onDismiss: () -> Unit,
+    onStandard: (WorkoutPreset) -> Unit,
+    onPersonal: (String) -> Unit,
+    onRename: (String, String) -> Unit,
+    onDelete: (String) -> Unit
+) {
+    var editingKey by remember { mutableStateOf<String?>(null) }
+    var editedName by remember { mutableStateOf("") }
+    var deleteKey by remember { mutableStateOf<String?>(null) }
+    Dialog(onDismissRequest = onDismiss, properties = DialogProperties(usePlatformDefaultWidth = false)) {
+        Surface(Modifier.fillMaxWidth().padding(16.dp), color = Panel, shape = RoundedCornerShape(28.dp)) {
+            Column(Modifier.padding(18.dp)) {
+                Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
+                    Text("TRAINING PLANEN", color = Red, fontSize = 10.sp, fontFamily = FontFamily.Monospace,
+                        modifier = Modifier.weight(1f))
+                    IconButton(onClick = onDismiss) { Text("✕", color = White) }
+                }
+                DisplayTitle("VORLAGEN", ndot, fontSize = 28.sp)
+                Text("Vorlage antippen, prüfen und Workout anlegen.", color = Muted, fontSize = 12.sp)
+                Spacer(Modifier.height(12.dp))
+                Column(Modifier.heightIn(max = 440.dp).verticalScroll(rememberScrollState()),
+                    verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                    SectionLabel("STANDARD", topPadding = 4.dp, bottomPadding = 4.dp)
+                    workoutPresets.forEach { preset ->
+                        Surface(color = Panel2, shape = RoundedCornerShape(18.dp),
+                            modifier = Modifier.fillMaxWidth().clickable { onStandard(preset) }) {
+                            Row(Modifier.padding(14.dp), verticalAlignment = Alignment.CenterVertically) {
+                                Column(Modifier.weight(1f)) {
+                                    Text(preset.title, color = White, fontSize = 16.sp)
+                                    Text("${preset.exerciseNames.size} Übungen · ${preset.kind.name.replace('_', ' ')}" +
+                                        if (preset.minutes > 0) " · ${preset.minutes} Min." else "", color = Muted, fontSize = 10.sp)
+                                    Text(preset.exerciseNames.joinToString(" · "), color = Muted, fontSize = 10.sp,
+                                        maxLines = 2, overflow = TextOverflow.Ellipsis)
+                                }
+                                Text("›", color = White, fontSize = 23.sp)
+                            }
+                        }
+                    }
+                    SectionLabel("MEINE VORLAGEN", topPadding = 14.dp, bottomPadding = 4.dp)
+                    if (templates.isEmpty()) Text("Eigene Vorlagen kannst du im Workout speichern.", color = Muted, fontSize = 12.sp)
+                    templates.forEach { (key, obj) ->
+                        Surface(color = Panel2, shape = RoundedCornerShape(18.dp), modifier = Modifier.fillMaxWidth()) {
+                            Column(Modifier.padding(12.dp)) {
+                                Row(verticalAlignment = Alignment.CenterVertically) {
+                                    Column(Modifier.weight(1f).clickable { onPersonal(key) }) {
+                                        Text(obj.optString("name"), color = White, fontSize = 16.sp)
+                                        Text("${obj.optJSONArray("sourceIds")?.length() ?: 0} Übungen · ${obj.optString("kind").replace('_', ' ')}",
+                                            color = Muted, fontSize = 10.sp)
+                                    }
+                                    IconButton(onClick = { editingKey = key; editedName = obj.optString("name") }) {
+                                        WorkoutActionIcon(WorkoutAction.EDIT)
+                                    }
+                                    IconButton(onClick = { deleteKey = key }) { WorkoutActionIcon(WorkoutAction.DELETE, Muted) }
+                                }
+                                if (editingKey == key) {
+                                    OutlinedTextField(editedName, { editedName = it.take(48) }, label = { Text("Vorlagenname") },
+                                        singleLine = true, modifier = Modifier.fillMaxWidth())
+                                    Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.End) {
+                                        TextButton(onClick = { editingKey = null }) { Text("Abbrechen") }
+                                        TextButton(enabled = editedName.isNotBlank(), onClick = {
+                                            onRename(key, editedName.trim()); editingKey = null
+                                        }) { Text("Speichern", color = White) }
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
+    deleteKey?.let { key ->
+        AlertDialog(onDismissRequest = { deleteKey = null }, containerColor = Panel,
+            title = { DisplayTitle("VORLAGE LÖSCHEN?", ndot, fontSize = 24.sp) },
+            text = { Text("Nur die Vorlage wird entfernt. Workouts und Trainingsdaten bleiben erhalten.", color = Muted) },
+            confirmButton = { TextButton(onClick = { onDelete(key); deleteKey = null }) { Text("Löschen", color = Red) } },
+            dismissButton = { TextButton(onClick = { deleteKey = null }) { Text("Abbrechen") } })
+    }
+}
+
+@Composable
 private fun WorkoutEditorDialog(
     ndot: FontFamily,
     title: String,
     initialName: String,
     initialNote: String,
+    initialPresetName: String? = null,
+    initialPersonalKey: String? = null,
     initialSelectedIds: Set<String>,
     initialKind: WorkoutKind,
     initialDurationSeconds: Int,
@@ -4240,8 +4308,75 @@ private fun WorkoutEditorDialog(
     var showPresetPicker by remember { mutableStateOf(false) }
     var showExercisePicker by remember { mutableStateOf(false) }
     var presetNotice by remember { mutableStateOf("") }
-    var selectedPresetName by remember { mutableStateOf("") }
+    var selectedPresetName by remember { mutableStateOf(initialPresetName ?: if (initialPersonalKey != null) "Vorlage" else "") }
     var selectedPresetTargets by remember { mutableStateOf(initialTargets) }
+
+    fun choosePersonalTemplate(obj: JSONObject) {
+                                        val imported = parseNpefExercises(obj.getJSONObject("catalog").toString()).getOrDefault(emptyList())
+                                        val sourceIds = obj.optJSONArray("sourceIds") ?: JSONArray()
+                                        val missing = mutableListOf<Exercise>()
+                                        val resolved = imported.mapIndexed { i, ex ->
+                                            val found = allExercises.find { it.id == sourceIds.optString(i) }
+                                                ?: allExercises.find { it.name.equals(ex.name, true) && it.kind == ex.kind }
+                                            if (found != null) ex.copy(id = found.id) else ex.also { missing.add(it) }
+                                        }
+                                        if (missing.isNotEmpty()) onAddPresetExercises(missing)
+                                        pendingPresetExercises = missing
+                                        selectedOrder = resolved.map { it.id }
+                                        selectedIds = selectedOrder.toSet()
+                                        selectedPresetTargets = resolved.associate { it.id to it.targetReps }
+                                        selectedWeights = resolved.associate { it.id to it.targetWeightKg }
+                                        workoutKind = runCatching { WorkoutKind.valueOf(obj.optString("kind")) }.getOrDefault(WorkoutKind.CLASSIC)
+                                        durationText = (obj.optInt("duration") / 60).coerceAtLeast(1).toString()
+                                        name = obj.optString("name"); note = obj.optString("note")
+                                        selectedPresetName = name
+                                        nameManuallyEdited = true
+                                        presetNotice = "Eigene Vorlage geladen: ${resolved.size} Übungen."
+                                        showPresetPicker = false
+    }
+    fun chooseStandardTemplate(preset: WorkoutPreset) {
+                                workoutKind = preset.kind
+                                selectedPresetName = preset.title
+                                durationText = (preset.minutes.takeIf { it > 0 } ?: 20).toString()
+                                name = preset.title
+                                nameManuallyEdited = true
+                                note = preset.description
+                                val existing = allExercises.associateBy { it.name.trim().lowercase(Locale.GERMAN) }
+                                val missing = preset.exerciseNames.mapNotNull { n ->
+                                    if (n.trim().lowercase(Locale.GERMAN) in existing) null
+                                    else presetExercise(n)?.copy(id = UUID.randomUUID().toString())
+                                }
+                                if (missing.isNotEmpty()) onAddPresetExercises(missing)
+                                val selected = preset.exerciseNames.mapNotNull { n ->
+                                    existing[n.trim().lowercase(Locale.GERMAN)]?.id
+                                        ?: missing.firstOrNull { it.name.equals(n, ignoreCase = true) }?.id
+                                }
+                                selectedIds = selected.toSet()
+                                selectedOrder = selected
+                                selectedWeights = emptyMap()
+                                pendingPresetExercises = missing
+                                val reps = when (preset.title) {
+                                    "Cindy" -> mapOf("Klimmzüge" to 5, "Liegestütze" to 10, "Kniebeugen" to 15)
+                                    "Dev-AMRAP" -> mapOf("Liegestütze" to 3, "Kniebeugen" to 5, "Klimmzüge" to 2)
+                                    else -> emptyMap()
+                                }
+                                selectedPresetTargets = preset.exerciseNames.mapNotNull { n ->
+                                    val id = existing[n.lowercase(Locale.GERMAN)]?.id
+                                        ?: missing.firstOrNull { it.name.equals(n, ignoreCase = true) }?.id
+                                    if (id != null && reps[n] != null) id to reps.getValue(n) else null
+                                }.toMap()
+                                presetNotice = "${selected.size}/${preset.exerciseNames.size} Übungen übernommen."
+                                showPresetPicker = false
+    }
+    LaunchedEffect(initialPresetName, initialPersonalKey) {
+        if (initialPresetName != null) {
+            workoutPresets.find { it.title == initialPresetName }?.let { chooseStandardTemplate(it) }
+        } else if (initialPersonalKey != null) {
+            personalPrefs.getString(initialPersonalKey, null)?.let { raw ->
+                runCatching { JSONObject(raw) }.getOrNull()?.let { choosePersonalTemplate(it) }
+            }
+        }
+    }
 
     // Wenn noch kein eigener Name eingegeben wurde, passt sich der Vorschlag an die gewaehlten Uebungen an
     LaunchedEffect(selectedIds) {
@@ -4419,27 +4554,7 @@ private fun WorkoutEditorDialog(
                             Surface(color = Panel2, shape = RoundedCornerShape(15.dp), modifier = Modifier.fillMaxWidth()) {
                                 Row(Modifier.padding(12.dp), verticalAlignment = Alignment.CenterVertically) {
                                     Column(Modifier.weight(1f).clickable {
-                                        val imported = parseNpefExercises(obj.getJSONObject("catalog").toString()).getOrDefault(emptyList())
-                                        val sourceIds = obj.optJSONArray("sourceIds") ?: JSONArray()
-                                        val missing = mutableListOf<Exercise>()
-                                        val resolved = imported.mapIndexed { i, ex ->
-                                            val found = allExercises.find { it.id == sourceIds.optString(i) }
-                                                ?: allExercises.find { it.name.equals(ex.name, true) && it.kind == ex.kind }
-                                            if (found != null) ex.copy(id = found.id) else ex.also { missing.add(it) }
-                                        }
-                                        if (missing.isNotEmpty()) onAddPresetExercises(missing)
-                                        pendingPresetExercises = missing
-                                        selectedOrder = resolved.map { it.id }
-                                        selectedIds = selectedOrder.toSet()
-                                        selectedPresetTargets = resolved.associate { it.id to it.targetReps }
-                                        selectedWeights = resolved.associate { it.id to it.targetWeightKg }
-                                        workoutKind = runCatching { WorkoutKind.valueOf(obj.optString("kind")) }.getOrDefault(WorkoutKind.CLASSIC)
-                                        durationText = (obj.optInt("duration") / 60).coerceAtLeast(1).toString()
-                                        name = obj.optString("name"); note = obj.optString("note")
-                                        selectedPresetName = name
-                                        nameManuallyEdited = true
-                                        presetNotice = "Eigene Vorlage geladen: ${resolved.size} Übungen."
-                                        showPresetPicker = false
+                                        choosePersonalTemplate(obj)
                                     }) {
                                         Text(obj.optString("name"), color = White, fontSize = 15.sp)
                                         Text("Eigene Vorlage", color = Muted, fontSize = 10.sp)
@@ -4455,38 +4570,7 @@ private fun WorkoutEditorDialog(
                     workoutPresets.forEach { preset ->
                         Surface(color = Panel2, shape = RoundedCornerShape(15.dp),
                             modifier = Modifier.fillMaxWidth().clickable {
-                                workoutKind = preset.kind
-                                selectedPresetName = preset.title
-                                durationText = (preset.minutes.takeIf { it > 0 } ?: 20).toString()
-                                name = preset.title
-                                nameManuallyEdited = true
-                                note = preset.description
-                                val existing = allExercises.associateBy { it.name.trim().lowercase(Locale.GERMAN) }
-                                val missing = preset.exerciseNames.mapNotNull { n ->
-                                    if (n.trim().lowercase(Locale.GERMAN) in existing) null
-                                    else presetExercise(n)?.copy(id = UUID.randomUUID().toString())
-                                }
-                                if (missing.isNotEmpty()) onAddPresetExercises(missing)
-                                val selected = preset.exerciseNames.mapNotNull { n ->
-                                    existing[n.trim().lowercase(Locale.GERMAN)]?.id
-                                        ?: missing.firstOrNull { it.name.equals(n, ignoreCase = true) }?.id
-                                }
-                                selectedIds = selected.toSet()
-                                selectedOrder = selected
-                                selectedWeights = emptyMap()
-                                pendingPresetExercises = missing
-                                val reps = when (preset.title) {
-                                    "Cindy" -> mapOf("Klimmzüge" to 5, "Liegestütze" to 10, "Kniebeugen" to 15)
-                                    "Dev-AMRAP" -> mapOf("Liegestütze" to 3, "Kniebeugen" to 5, "Klimmzüge" to 2)
-                                    else -> emptyMap()
-                                }
-                                selectedPresetTargets = preset.exerciseNames.mapNotNull { n ->
-                                    val id = existing[n.lowercase(Locale.GERMAN)]?.id
-                                        ?: missing.firstOrNull { it.name.equals(n, ignoreCase = true) }?.id
-                                    if (id != null && reps[n] != null) id to reps.getValue(n) else null
-                                }.toMap()
-                                presetNotice = "${selected.size}/${preset.exerciseNames.size} Übungen übernommen."
-                                showPresetPicker = false
+                                chooseStandardTemplate(preset)
                             }) {
                             Column(Modifier.padding(13.dp)) {
                                 Text(preset.title, color = White, fontSize = 15.sp)
@@ -4535,12 +4619,15 @@ private fun ExerciseDetailDialog(
     logs: List<ExerciseLog>,
     onDismiss: () -> Unit,
     onLogSet: (ExerciseLog) -> Unit,
+    canLog: Boolean,
     onRemoveFromWorkout: (() -> Unit)?,
     onDeleteExercise: () -> Unit,
     onShareExercise: () -> Unit,
     onExportExercise: () -> Unit,
     onHapticTick: () -> Unit
 ) {
+    var confirmExerciseDelete by remember { mutableStateOf(false) }
+    var showExerciseActions by remember { mutableStateOf(false) }
     val lastLog = logs.lastOrNull()
     var weightText by remember(exercise.id) {
         mutableStateOf(
@@ -4563,35 +4650,24 @@ private fun ExerciseDetailDialog(
             shape = RoundedCornerShape(28.dp)
         ) {
             Column(Modifier.verticalScroll(rememberScrollState()).padding(22.dp)) {
-                Row(
-                    Modifier.fillMaxWidth(),
-                    horizontalArrangement = Arrangement.SpaceBetween,
-                    verticalAlignment = Alignment.CenterVertically
-                ) {
-                    Text(
-                        "${exercise.muscle.uppercase(Locale.GERMAN)} · ${exerciseKindLabel(exercise.kind).uppercase(Locale.GERMAN)}",
-                        color = Red,
-                        fontFamily = FontFamily.Monospace,
-                        fontSize = 10.sp,
-                        letterSpacing = 1.5.sp,
-                        modifier = Modifier.weight(1f)
-                    )
-                    if (onRemoveFromWorkout != null) {
-                        TextButton(onClick = onRemoveFromWorkout) {
-                            Text("Entfernen", color = Muted, fontSize = 11.sp)
+                Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
+                    Text(exerciseKindLabel(exercise.kind).uppercase(Locale.GERMAN), color = Red,
+                        fontFamily = FontFamily.Monospace, fontSize = 10.sp, modifier = Modifier.weight(1f))
+                    Box {
+                        IconButton(onClick = { showExerciseActions = true }) { Text("⋮", color = White, fontSize = 24.sp) }
+                        DropdownMenu(expanded = showExerciseActions, onDismissRequest = { showExerciseActions = false }) {
+                            DropdownMenuItem(text = { Text("Übung teilen") }, onClick = { showExerciseActions = false; onShareExercise() })
+                            DropdownMenuItem(text = { Text("Als Datei exportieren") }, onClick = { showExerciseActions = false; onExportExercise() })
+                            if (onRemoveFromWorkout != null) DropdownMenuItem(text = { Text("Aus Workout entfernen") },
+                                onClick = { showExerciseActions = false; onRemoveFromWorkout() })
                         }
                     }
-                    TextButton(onClick = onDeleteExercise) {
-                        Text("Löschen", color = Red, fontSize = 11.sp)
-                    }
+                    IconButton(onClick = { confirmExerciseDelete = true }) { WorkoutActionIcon(WorkoutAction.DELETE, Muted) }
+                    IconButton(onClick = onDismiss) { Text("✕", color = White, fontSize = 18.sp) }
                 }
-
-                DisplayTitle(exercise.name, ndot, fontSize = 26.sp)
-                Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                    TextButton(onClick = onShareExercise) { Text("Teilen ↗", color = White) }
-                    TextButton(onClick = onExportExercise) { Text("Als Datei exportieren", color = Muted) }
-                }
-
+                DisplayTitle(exercise.name.uppercase(Locale.GERMAN), ndot, fontSize = 26.sp)
+                Text(exercise.muscle + " · " + exerciseKindLabel(exercise.kind), color = Muted, fontSize = 12.sp)
+                Spacer(Modifier.height(8.dp))
                 if (exercise.description.isNotBlank()) {
                     Spacer(Modifier.height(8.dp))
                     Text(exercise.description, color = Muted, fontSize = 13.sp, lineHeight = 18.sp)
@@ -4625,6 +4701,7 @@ private fun ExerciseDetailDialog(
                     }
                 }
 
+                if (canLog) {
                 SectionLabel("SATZ EINTRAGEN", topPadding = 18.dp, bottomPadding = 10.dp)
                 when (exercise.kind) {
                     ExerciseKind.CARDIO, ExerciseKind.AMRAP -> {
@@ -4706,7 +4783,7 @@ private fun ExerciseDetailDialog(
                             val w = weightText.replace(',', '.').toFloatOrNull()?.coerceIn(0f, 500f) ?: 0f
                             val r = repsText.toIntOrNull()?.coerceIn(1, 500) ?: 1
                             val s = secondsText.toIntOrNull()?.coerceIn(1, 3600) ?: 30
-                            onLogSet(
+                            if (canLog) onLogSet(
                                 ExerciseLog(
                                     id = UUID.randomUUID().toString(),
                                     exerciseId = exercise.id,
@@ -4733,6 +4810,12 @@ private fun ExerciseDetailDialog(
                     }
                 }
 
+                } else {
+                    Surface(color = Panel2, shape = RoundedCornerShape(16.dp), modifier = Modifier.fillMaxWidth().padding(top = 14.dp)) {
+                        Text("Sätze werden ausschließlich in einem gestarteten Workout erfasst.", color = Muted,
+                            fontSize = 12.sp, modifier = Modifier.padding(14.dp))
+                    }
+                }
                 if (logs.isNotEmpty()) {
                     SectionLabel("VERLAUF (${logs.size} SÄTZE)", topPadding = 18.dp, bottomPadding = 8.dp)
                     Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
@@ -4762,6 +4845,14 @@ private fun ExerciseDetailDialog(
             }
         }
     }
+    if (confirmExerciseDelete) AlertDialog(
+        onDismissRequest = { confirmExerciseDelete = false }, containerColor = Panel,
+        title = { DisplayTitle("ÜBUNG LÖSCHEN?", ndot, fontSize = 24.sp) },
+        text = { Text("Die Übung wird aus deiner Bibliothek entfernt. Möchtest du fortfahren?", color = Muted) },
+        confirmButton = { TextButton(onClick = { confirmExerciseDelete = false; onDeleteExercise() }) { Text("Löschen", color = Red) } },
+        dismissButton = { TextButton(onClick = { confirmExerciseDelete = false }) { Text("Abbrechen") } }
+    )
+
 }
 
 private fun validatedMediaUrl(raw: String): Uri? = runCatching {
@@ -5883,7 +5974,7 @@ private fun SetupScreen(
         )
         HorizontalDivider(color = Color(0xFF242424), modifier = Modifier.padding(top = 6.dp))
         Text(
-            "NPLANNER · VERSION 0.37",
+            "NPLANNER · VERSION 0.38",
             color = Color(0xFFB6B6B6),
             fontFamily = FontFamily.Monospace,
             fontSize = 10.sp,
