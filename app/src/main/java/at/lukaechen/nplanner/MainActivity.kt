@@ -210,7 +210,7 @@ data class Workout(
 )
 
 private val LocalDotHeadings = compositionLocalOf { false }
-private val LocalClassicHeadings = compositionLocalOf { FontFamily.Default }
+private val LocalClassicHeadings = compositionLocalOf<FontFamily> { FontFamily.Default }
 
 // ---------- Zeit- und Regel-Helfer ----------
 
