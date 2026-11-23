@@ -19,6 +19,7 @@ import androidx.activity.compose.setContent
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.animation.core.FastOutSlowInEasing
 import androidx.compose.animation.core.Spring
+import androidx.compose.animation.core.Animatable
 import androidx.compose.animation.core.animateFloatAsState
 import androidx.compose.animation.core.spring
 import androidx.compose.animation.core.tween
@@ -794,6 +795,40 @@ class MainActivity : ComponentActivity() {
             prefs.edit().putString("snap:$d", obj.toString()).apply()
         }
 
+        fun preservePastSnapshotsBeforeRuleChange() {
+            // Old rules must still be present while reconstructing historical totals.
+            // Never overwrite snapshots already stored for a date.
+            val yesterday = date.minusDays(1)
+            val knownDates = mutableListOf<LocalDate>()
+            rules.mapNotNullTo(knownDates) { r ->
+                runCatching { LocalDate.parse(r.createdDate) }.getOrNull()
+            }
+            prefs.all.keys.forEach { key ->
+                val datePart = when {
+                    key.startsWith("snap:") -> key.removePrefix("snap:")
+                    key.startsWith("done:") || key.startsWith("cnt:") || key.startsWith("wk_day:") ->
+                        key.substringAfter(':').substringBefore(':')
+                    else -> null
+                }
+                datePart?.let { raw ->
+                    runCatching { LocalDate.parse(raw) }.getOrNull()?.let { knownDates.add(it) }
+                }
+            }
+            val first = knownDates.filter { !it.isAfter(yesterday) }.minOrNull() ?: return
+            // Bounded to ten years to avoid pathological preference data.
+            val earliest = maxOf(first, yesterday.minusYears(10))
+            val editor = prefs.edit()
+            var d = earliest
+            while (!d.isAfter(yesterday)) {
+                if (!prefs.contains("snap:$d")) {
+                    val snap = daySnapshot(d)
+                    editor.putString("snap:$d", JSONObject().put("done", snap.done).put("total", snap.total).toString())
+                }
+                d = d.plusDays(1)
+            }
+            editor.apply()
+        }
+
         fun readDaySnapshot(d: LocalDate): DaySnapshot {
             val live = daySnapshot(d)
             if (d == date || d.isAfter(date)) return live
@@ -898,6 +933,7 @@ class MainActivity : ComponentActivity() {
         }
 
         fun deleteRule(ruleId: String) {
+            preservePastSnapshotsBeforeRuleChange()
             rules = rules.filterNot { it.id == ruleId }
             saveRules(rules)
             persistTodaySnapshot(date)
@@ -909,19 +945,21 @@ class MainActivity : ComponentActivity() {
         val scope = rememberCoroutineScope()
         var navTargetPage by remember { mutableIntStateOf(0) }
         var isNavAnimating by remember { mutableStateOf(false) }
+        val pageOpacity = remember { Animatable(1f) }
 
         fun selectPage(target: Int) {
-            if (target in 0..3 && target != pagerState.currentPage) {
+            if (!isNavAnimating && target in 0..3 && target != pagerState.currentPage) {
                 triggerHaptic(context, haptic, HapticStyle.TICK)
                 navTargetPage = target
                 isNavAnimating = true
                 scope.launch {
                     try {
-                        pagerState.animateScrollToPage(
-                            page = target,
-                            animationSpec = tween(durationMillis = 280, easing = FastOutSlowInEasing)
-                        )
+                        // Direct jump, no intermediate pages rendered during distant tab changes.
+                        pageOpacity.animateTo(0.15f, tween(durationMillis = 110))
+                        pagerState.scrollToPage(target)
+                        pageOpacity.animateTo(1f, tween(durationMillis = 230, easing = FastOutSlowInEasing))
                     } finally {
+                        pageOpacity.snapTo(1f)
                         isNavAnimating = false
                     }
                 }
@@ -938,8 +976,9 @@ class MainActivity : ComponentActivity() {
             Box(Modifier.fillMaxSize().background(Bg)) {
                 HorizontalPager(
                     state = pagerState,
-                    beyondViewportPageCount = 3,
-                    modifier = Modifier.fillMaxSize()
+                    beyondViewportPageCount = 1,
+                    userScrollEnabled = !isNavAnimating,
+                    modifier = Modifier.fillMaxSize().graphicsLayer { alpha = pageOpacity.value }
                 ) { p ->
                     when (p) {
                         0 -> TodayScreen(
@@ -1094,6 +1133,7 @@ class MainActivity : ComponentActivity() {
                 ndot = ndot,
                 onDismiss = { addDialog = false },
                 onCreate = { rule ->
+                    preservePastSnapshotsBeforeRuleChange()
                     rules = rules + rule.copy(createdDate = date.toString())
                     saveRules(rules)
                     persistTodaySnapshot(date)
@@ -2357,15 +2397,19 @@ private fun DayDetailCard(
 // ---------- Workouts, Uebungen & Rekorde (Reiter 3) ----------
 
 private fun suggestWorkoutName(existing: List<Workout>, selectedExercises: List<Exercise>): String {
-    val num = existing.size + 1
-    val muscles = selectedExercises.map { it.muscle.trim() }.filter { it.isNotBlank() }.distinct()
-    val suffix = when {
-        muscles.isEmpty() -> "Training"
-        muscles.size == 1 -> muscles.first()
-        muscles.size == 2 -> "${muscles[0]} & ${muscles[1]}"
-        else -> "Ganzkörper"
+    val now = java.time.LocalDateTime.now()
+    val day = listOf("Montag", "Dienstag", "Mittwoch", "Donnerstag", "Freitag", "Samstag", "Sonntag")[now.dayOfWeek.value - 1]
+    val time = when (now.hour) {
+        in 5..10 -> "Morgens"
+        in 11..16 -> "Nachmittags"
+        else -> "Abends"
     }
-    return "Workout #$num · $suffix"
+    val base = "Workout • $day $time"
+    val used = existing.map { it.name.trim() }.toSet()
+    if (base !in used) return base
+    var index = 2
+    while ("$base ($index)" in used) index++
+    return "$base ($index)"
 }
 
 private fun bestRecordText(ex: Exercise, logs: List<ExerciseLog>): Pair<String, String>? {
@@ -4400,7 +4444,7 @@ private fun SetupScreen(
         )
         HorizontalDivider(color = Color(0xFF242424), modifier = Modifier.padding(top = 6.dp))
         Text(
-            "NPLANNER · VERSION 0.21",
+            "NPLANNER · VERSION 0.22",
             color = Color(0xFFB6B6B6),
             fontFamily = FontFamily.Monospace,
             fontSize = 10.sp,
