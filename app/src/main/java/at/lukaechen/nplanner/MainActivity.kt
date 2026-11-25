@@ -4206,9 +4206,12 @@ private data class WorkoutSetGroup(val label: String, val count: Int)
 private fun workoutSetLabel(set: JSONObject, kind: ExerciseKind): String = when (kind) {
     ExerciseKind.WEIGHT -> npString(R.string.np_e88f262429f9 , java.math.BigDecimal.valueOf(set.optDouble("weightKg")).stripTrailingZeros().toPlainString().replace('.', ','), set.optInt("reps"))
     ExerciseKind.BODYWEIGHT -> npString(R.string.np_6a8982ba88d0 , set.optInt("reps"))
-    ExerciseKind.CARDIO -> npString(R.string.np_ce23a78c5616).format(npLocale(), set.optInt("seconds") / 60, set.optInt("seconds") % 60) +
-        if (set.optDouble("distanceKm") > 0) npString(R.string.np_a9f2c6673cc5 , set.optDouble("distanceKm")) else ""
-    ExerciseKind.TIMED, ExerciseKind.AMRAP -> npString(R.string.np_7f854c57c3cb , set.optInt("seconds"))
+    ExerciseKind.CARDIO -> {
+        val duration = set.optInt("seconds"); val km = set.optDouble("distanceKm")
+        val base = "%02d:%02d".format(npLocale(), duration / 60, duration % 60) + if (km > 0.0) " · %.2f km".format(npLocale(), km) else ""
+        if (km > 0.0 && duration > 0) { val pace = (duration / km).roundToInt(); val speed = km / (duration / 3600.0); base + " · %d:%02d min/km · Ø %.2f km/h".format(npLocale(), pace / 60, pace % 60, speed) } else base
+    }
+    ExerciseKind.TIMED, ExerciseKind.AMRAP -> "%02d:%02d".format(npLocale(), set.optInt("seconds") / 60, set.optInt("seconds") % 60)
 }
 
 private fun groupedWorkoutSets(sets: JSONArray, kind: ExerciseKind): List<WorkoutSetGroup> {
@@ -4323,26 +4326,42 @@ private fun WorkoutSessionSummary(
 private fun QuickWorkoutSet(exercise: Exercise, workout: Workout, today: String, lastLog: ExerciseLog?, onSave: (ExerciseLog) -> Unit) {
     var weight by remember(exercise.id, workout.id) { mutableStateOf(
         (lastLog?.weightKg ?: workout.targetWeights[exercise.id] ?: exercise.targetWeightKg).toString()) }
-    var reps by remember(exercise.id, workout.id) { mutableStateOf(
-        (lastLog?.reps ?: workout.amrapTargets[exercise.id] ?: exercise.targetReps).toString()) }
-    Row(Modifier.fillMaxWidth().padding(bottom = 8.dp), horizontalArrangement = Arrangement.spacedBy(8.dp),
-        verticalAlignment = Alignment.CenterVertically) {
-        if (exercise.kind == ExerciseKind.WEIGHT) OutlinedTextField(weight, { weight = it.take(6) },
-            label = { Text(npString(R.string.np_1389845b02c0)) }, singleLine = true, modifier = Modifier.weight(1f),
-            keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Decimal))
-        OutlinedTextField(reps, { reps = it.filter(Char::isDigit).take(3) }, label = { Text(npString(R.string.np_8752f1c63e6e)) },
-            singleLine = true, modifier = Modifier.weight(1f), keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number))
-        val kg = weight.replace(',', '.').toFloatOrNull()
-        val repetitions = reps.toIntOrNull()
-        Button(onClick = {
-            onSave(ExerciseLog(UUID.randomUUID().toString(), exercise.id, today,
-                weightKg = if (exercise.kind == ExerciseKind.WEIGHT) kg ?: 0f else 0f,
-                reps = repetitions ?: 1, workoutId = workout.id))
-        }, enabled = repetitions != null && repetitions in 1..500 &&
-            (exercise.kind != ExerciseKind.WEIGHT || (kg != null && kg.isFinite() && kg in 0f..500f)),
-            shape = RoundedCornerShape(14.dp), contentPadding = PaddingValues(horizontal = 12.dp),
-            colors = ButtonDefaults.buttonColors(containerColor = White, contentColor = Bg),
-            modifier = Modifier.height(54.dp)) { Text(npString(R.string.np_25d53566c51a), fontSize = 11.sp) }
+    var reps by remember(exercise.id, workout.id) { mutableStateOf((lastLog?.reps?.takeIf { it > 0 } ?: workout.amrapTargets[exercise.id] ?: exercise.targetReps).toString()) }
+    val initialSeconds = lastLog?.seconds?.takeIf { it > 0 } ?: exercise.targetSeconds.coerceAtLeast(0)
+    var minutes by remember(exercise.id, workout.id) { mutableStateOf((initialSeconds / 60).toString()) }
+    var seconds by remember(exercise.id, workout.id) { mutableStateOf((initialSeconds % 60).toString().padStart(2, '0')) }
+    var distance by remember(exercise.id, workout.id) { mutableStateOf(lastLog?.distanceKm?.takeIf { it > 0f }?.toString() ?: "") }
+    val secondsPart = seconds.toIntOrNull() ?: -1
+    val duration = (minutes.toIntOrNull() ?: 0) * 60 + secondsPart.coerceAtLeast(0)
+    Column(Modifier.fillMaxWidth().padding(bottom = 8.dp)) {
+        if (exercise.kind in listOf(ExerciseKind.WEIGHT, ExerciseKind.BODYWEIGHT)) {
+            Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                if (exercise.kind == ExerciseKind.WEIGHT) OutlinedTextField(weight, { weight = it.take(6) }, label = { Text(npString(R.string.np_1389845b02c0)) }, singleLine = true, modifier = Modifier.weight(1f), keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Decimal))
+                OutlinedTextField(reps, { reps = it.filter(Char::isDigit).take(3) }, label = { Text(npString(R.string.np_8752f1c63e6e)) }, singleLine = true, modifier = Modifier.weight(1f), keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number))
+            }
+        } else {
+            Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                OutlinedTextField(minutes, { minutes = it.filter(Char::isDigit).take(3) }, label = { Text("Minuten") }, singleLine = true, modifier = Modifier.weight(1f), keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number))
+                OutlinedTextField(seconds, { seconds = it.filter(Char::isDigit).take(2) }, label = { Text("Sekunden") }, singleLine = true, modifier = Modifier.weight(1f), keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number))
+            }
+            if (exercise.kind == ExerciseKind.CARDIO) {
+                OutlinedTextField(distance, { distance = it.take(8) }, label = { Text("Distanz (km, optional)") }, singleLine = true, modifier = Modifier.fillMaxWidth().padding(top = 8.dp), keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Decimal))
+                val kmPreview = distance.replace(',', '.').toFloatOrNull() ?: 0f
+                if (kmPreview > 0f && duration > 0) {
+                    val pace = (duration / kmPreview).roundToInt(); val speed = kmPreview / (duration / 3600f)
+                    Text("%d:%02d min/km · Ø %.2f km/h".format(npLocale(), pace / 60, pace % 60, speed), color = Muted, fontSize = 11.sp, modifier = Modifier.padding(top = 6.dp))
+                }
+            }
+        }
+        val kg = weight.replace(',', '.').toFloatOrNull(); val repetitions = reps.toIntOrNull(); val km = distance.replace(',', '.').toFloatOrNull() ?: 0f
+        val valid = when (exercise.kind) {
+            ExerciseKind.WEIGHT -> repetitions in 1..500 && kg != null && kg.isFinite() && kg in 0f..500f
+            ExerciseKind.BODYWEIGHT -> repetitions in 1..500
+            ExerciseKind.TIMED -> duration in 1..86400 && secondsPart in 0..59
+            ExerciseKind.CARDIO -> duration in 1..86400 && secondsPart in 0..59 && km in 0f..1000f
+            ExerciseKind.AMRAP -> false
+        }
+        Button(onClick = { onSave(ExerciseLog(UUID.randomUUID().toString(), exercise.id, today, weightKg = if (exercise.kind == ExerciseKind.WEIGHT) kg ?: 0f else 0f, reps = if (exercise.kind in listOf(ExerciseKind.WEIGHT, ExerciseKind.BODYWEIGHT)) repetitions ?: 0 else 0, seconds = if (exercise.kind in listOf(ExerciseKind.TIMED, ExerciseKind.CARDIO)) duration else 0, distanceKm = if (exercise.kind == ExerciseKind.CARDIO) km else 0f, workoutId = workout.id)) }, enabled = valid, shape = RoundedCornerShape(14.dp), colors = ButtonDefaults.buttonColors(containerColor = White, contentColor = Bg), modifier = Modifier.fillMaxWidth().height(46.dp).padding(top = 8.dp)) { Text(if (exercise.kind == ExerciseKind.CARDIO) "+ EINTRAG" else "+ SATZ", fontSize = 11.sp) }
     }
 }
 
