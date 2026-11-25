@@ -4515,7 +4515,7 @@ private fun WorkoutExerciseStack(
                         }
                         if (expanded) {
                             Column(Modifier.padding(start = 14.dp, end = 14.dp, bottom = 12.dp)) {
-                                if (isActive && ex.kind in listOf(ExerciseKind.WEIGHT, ExerciseKind.BODYWEIGHT)) {
+                                if (isActive && ex.kind != ExerciseKind.AMRAP) {
                                     QuickWorkoutSet(ex, workout, today, lastLog, onQuickLog)
                                     ownLogs.forEachIndexed { setIndex, log ->
                                         Row(Modifier.fillMaxWidth().padding(vertical = 5.dp)) {
@@ -4524,11 +4524,7 @@ private fun WorkoutExerciseStack(
                                         }
                                     }
                                 } else Text(exerciseSummary(ex), color = Muted, fontSize = 12.sp)
-                                if (isActive && ex.kind !in listOf(ExerciseKind.WEIGHT, ExerciseKind.BODYWEIGHT)) {
-                                    TextButton(onClick = { latestSelect(ex) }, contentPadding = PaddingValues(0.dp)) {
-                                        Text(npString(R.string.np_2d007b4e073f), color = White, fontSize = 12.sp)
-                                    }
-                                }
+
                             }
                         }
                     }
