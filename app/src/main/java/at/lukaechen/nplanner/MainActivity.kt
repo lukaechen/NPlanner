@@ -917,6 +917,7 @@ class MainActivity : ComponentActivity() {
         var nowMin by remember { mutableIntStateOf(minuteOfDay()) }
         var tick by remember { mutableIntStateOf(0) }
         var addDialog by remember { mutableStateOf(false) }
+        var editingRule by remember { mutableStateOf<Rule?>(null) }
         var dotHeadings by remember { mutableStateOf(prefs.getBoolean("use_ndot_headings", false)) }
         var orbit by remember { mutableStateOf(prefs.getString("progress_style", "bars") == "orbit") }
         var historyDots by remember { mutableStateOf(prefs.getString("history_style", "dots") == "dots") }
@@ -965,17 +966,14 @@ class MainActivity : ComponentActivity() {
                     (r.createdDate.isBlank() || r.createdDate <= d.toString())
             }
             val mandatoryDailyForDay = allDailyForDay.filterNot { it.optional }
-            // A weekly goal contributes only on days where an occurrence was completed.
-            // The calendar stores the actual weekly progress (e.g. 1/4), not 1/1.
             val weeklyDoneOnDay = weeklyRules.filter { doneTodayForWeekly(it, d) }
-            val mandatoryWeeklyDoneOnDay = weeklyDoneOnDay.filterNot { it.optional }
+            // Flexible weekly goals are shown as x/target in the day details, but they do
+            // not decide whether the day itself is complete.
             val doneDaily = mandatoryDailyForDay.count { doneCount(it, d) >= totalOf(it) }
-            val doneWeekly = mandatoryWeeklyDoneOnDay.sumOf { weeklyProgressThroughDay(it, d) }
-            val total = mandatoryDailyForDay.size + mandatoryWeeklyDoneOnDay.sumOf { totalOf(it) }
             return DaySnapshot(
                 date = d,
-                done = doneDaily + doneWeekly,
-                total = total,
+                done = doneDaily,
+                total = mandatoryDailyForDay.size,
                 dailyRules = allDailyForDay,
                 weeklyDoneRules = weeklyDoneOnDay
             )
@@ -993,7 +991,7 @@ class MainActivity : ComponentActivity() {
                         .put("${r.name} (Wochenziel)")
                         .put(weeklyProgressThroughDay(r, d))
                         .put(totalOf(r))
-                        .put(if (r.optional) 1 else 0)
+                        .put(1)
                 )
             }
             val obj = JSONObject().put("done", snap.done).put("total", snap.total).put("items", items)
@@ -1024,7 +1022,7 @@ class MainActivity : ComponentActivity() {
                         .put("${r.name} (Wochenziel)")
                         .put(weeklyProgressThroughDay(r, d))
                         .put(totalOf(r))
-                        .put(if (r.optional) 1 else 0)
+                        .put(1)
                 )
                         }
                         prefs.edit().putString("snap:${d}", obj.put("items", items).toString()).apply()
@@ -1048,27 +1046,20 @@ class MainActivity : ComponentActivity() {
                         runCatching {
                             val a = arr.getJSONArray(i)
                             val storedName = a.getString(0)
-                            val storedDone = a.getInt(1)
-                            val storedTarget = a.getInt(2)
-                            // Repair calendar snapshots from older builds that stored a
-                            // weekly occurrence as 1/1 rather than its real x/target value.
-                            val weeklyRule = if (storedTarget == 1 && storedName.endsWith(" (Wochenziel)")) {
+                            val weeklyRule = if (storedName.endsWith(" (Wochenziel)")) {
                                 weeklyRules.firstOrNull { it.name == storedName.removeSuffix(" (Wochenziel)") }
                             } else null
                             HistoricalTask(
                                 name = storedName,
-                                done = weeklyRule?.let { weeklyProgressThroughDay(it, d) } ?: storedDone,
-                                target = weeklyRule?.let(::totalOf) ?: storedTarget,
-                                optional = a.optInt(3) == 1
+                                done = weeklyRule?.let { weeklyProgressThroughDay(it, d) } ?: a.getInt(1),
+                                target = weeklyRule?.let(::totalOf) ?: a.getInt(2),
+                                optional = weeklyRule != null || a.optInt(3) == 1
                             )
                         }.getOrNull()
                     }
-                    val repairedDone = if (items.isNotEmpty()) {
-                        items.filterNot { it.optional }.sumOf { it.done.coerceAtMost(it.target) }
-                    } else sDone
-                    val repairedTotal = if (items.isNotEmpty()) {
-                        items.filterNot { it.optional }.sumOf { it.target }
-                    } else sTotal
+                    val requiredItems = items.filterNot { it.optional || it.name.endsWith(" (Wochenziel)") }
+                    val repairedDone = if (items.isNotEmpty()) requiredItems.sumOf { it.done.coerceAtMost(it.target) } else sDone
+                    val repairedTotal = if (items.isNotEmpty()) requiredItems.sumOf { it.target } else sTotal
                     live.copy(done = repairedDone, total = repairedTotal, historicalTasks = items)
                 }.getOrNull()
                 if (parsed != null) return parsed
@@ -1387,6 +1378,10 @@ class MainActivity : ComponentActivity() {
                                     triggerHaptic(context, haptic, HapticStyle.TICK)
                                 }
                             },
+                            onEdit = { rule ->
+                                triggerHaptic(context, haptic, HapticStyle.TICK)
+                                editingRule = rule
+                            },
                             onDelete = ::deleteRule,
                             onAdd = {
                                 triggerHaptic(context, haptic, HapticStyle.TICK)
@@ -1416,16 +1411,25 @@ class MainActivity : ComponentActivity() {
                 )
             }
 
-            if (addDialog) NewTaskDialog(
+            if (addDialog || editingRule != null) NewTaskDialog(
                 ndot = ndot,
-                onDismiss = { addDialog = false },
-                onCreate = { rule ->
+                initialRule = editingRule,
+                onDismiss = {
+                    addDialog = false
+                    editingRule = null
+                },
+                onSave = { rule ->
                     freezeHistoryBeforeRuleChange()
-                    rules = rules + rule.copy(createdDate = date.toString())
+                    rules = if (editingRule == null) {
+                        rules + rule.copy(createdDate = date.toString())
+                    } else {
+                        rules.map { existing -> if (existing.id == rule.id) rule else existing }
+                    }
                     saveRules(rules)
                     persistTodaySnapshot(date)
                     triggerHaptic(context, haptic, HapticStyle.TASK_DONE)
                     addDialog = false
+                    editingRule = null
                 }
             )
         }
@@ -2931,8 +2935,6 @@ private fun TrainingScreen(
             resultPrefs.edit().putString("workout_session:${classicRunId}", result.toString()).apply()
             resultRevision++
             selectedWorkoutResult = result
-            // Completed sessions move to history. Reusable configurations are kept only
-            // when the user explicitly saved them as workout_template:*.
             onDeleteWorkout(finishedWorkout.id)
         }
         amrapWorkoutId = null
@@ -6242,6 +6244,7 @@ private fun SetupScreen(
     testMode: Boolean,
     onTestModeChange: (Boolean) -> Unit,
     onMove: (Int, Int) -> Unit,
+    onEdit: (Rule) -> Unit,
     onDelete: (String) -> Unit,
     onAdd: () -> Unit
 ) {
@@ -6356,6 +6359,15 @@ private fun SetupScreen(
                             Text(rule.name, color = White, fontSize = 15.sp)
                             Spacer(Modifier.height(2.dp))
                             Text(scheduleLabel(rule), color = Muted, fontSize = 10.sp)
+                        }
+                        Box(
+                            modifier = Modifier
+                                .size(36.dp)
+                                .clip(CircleShape)
+                                .clickable { onEdit(rule) },
+                            contentAlignment = Alignment.Center
+                        ) {
+                            WorkoutActionIcon(WorkoutAction.EDIT, White)
                         }
                         Box(
                             modifier = Modifier
@@ -6507,18 +6519,23 @@ private fun TimeBox(label: String, minutes: Int, ndot: FontFamily, modifier: Mod
 }
 
 @Composable
-private fun NewTaskDialog(ndot: FontFamily, onDismiss: () -> Unit, onCreate: (Rule) -> Unit) {
+private fun NewTaskDialog(
+    ndot: FontFamily,
+    initialRule: Rule? = null,
+    onDismiss: () -> Unit,
+    onSave: (Rule) -> Unit
+) {
     val context = LocalContext.current
     val haptic = LocalHapticFeedback.current
-    var name by remember { mutableStateOf("") }
-    var kind by remember { mutableStateOf(RuleKind.ALLDAY) }
-    var timeMin by remember { mutableIntStateOf(8 * 60) }
-    var every by remember { mutableIntStateOf(120) }
-    var startMin by remember { mutableIntStateOf(8 * 60) }
-    var endMin by remember { mutableIntStateOf(20 * 60) }
-    var weeklyTarget by remember { mutableIntStateOf(3) }
-    var days by remember { mutableStateOf((1..7).toSet()) }
-    var optional by remember { mutableStateOf(false) }
+    var name by remember(initialRule?.id) { mutableStateOf(initialRule?.name.orEmpty()) }
+    var kind by remember(initialRule?.id) { mutableStateOf(initialRule?.kind ?: RuleKind.ALLDAY) }
+    var timeMin by remember(initialRule?.id) { mutableIntStateOf(initialRule?.timeMin ?: 8 * 60) }
+    var every by remember(initialRule?.id) { mutableIntStateOf(initialRule?.everyMin ?: 120) }
+    var startMin by remember(initialRule?.id) { mutableIntStateOf(initialRule?.fromMin ?: 8 * 60) }
+    var endMin by remember(initialRule?.id) { mutableIntStateOf(initialRule?.toMin ?: 20 * 60) }
+    var weeklyTarget by remember(initialRule?.id) { mutableIntStateOf(initialRule?.weeklyTarget ?: 3) }
+    var days by remember(initialRule?.id) { mutableStateOf(initialRule?.days ?: (1..7).toSet()) }
+    var optional by remember(initialRule?.id) { mutableStateOf(initialRule?.optional ?: false) }
 
     fun pick(initial: Int, set: (Int) -> Unit) {
         android.app.TimePickerDialog(
@@ -6537,7 +6554,7 @@ private fun NewTaskDialog(ndot: FontFamily, onDismiss: () -> Unit, onCreate: (Ru
     Dialog(onDismissRequest = onDismiss, properties = DialogProperties(usePlatformDefaultWidth = false)) {
         Surface(modifier = Modifier.padding(horizontal = 16.dp).fillMaxWidth(), color = Panel, shape = RoundedCornerShape(28.dp)) {
             Column(Modifier.verticalScroll(rememberScrollState()).padding(22.dp)) {
-                DisplayTitle(npString(R.string.np_060813ffb8c9), ndot, fontSize = 24.sp)
+                DisplayTitle(if (initialRule == null) npString(R.string.np_060813ffb8c9) else "AUFGABE BEARBEITEN", ndot, fontSize = 24.sp)
                 Spacer(Modifier.height(14.dp))
                 OutlinedTextField(
                     value = name,
@@ -6660,9 +6677,9 @@ private fun NewTaskDialog(ndot: FontFamily, onDismiss: () -> Unit, onCreate: (Ru
                     TextButton(
                         enabled = valid,
                         onClick = {
-                            onCreate(
+                            onSave(
                                 Rule(
-                                    id = UUID.randomUUID().toString(),
+                                    id = initialRule?.id ?: UUID.randomUUID().toString(),
                                     name = name.trim(),
                                     days = if (kind == RuleKind.WEEKLY) (1..7).toSet() else days,
                                     kind = kind,
@@ -6671,7 +6688,8 @@ private fun NewTaskDialog(ndot: FontFamily, onDismiss: () -> Unit, onCreate: (Ru
                                     fromMin = startMin,
                                     toMin = endMin,
                                     weeklyTarget = if (kind == RuleKind.WEEKLY) weeklyTarget else 1,
-                                    optional = optional
+                                    optional = optional,
+                                    createdDate = initialRule?.createdDate.orEmpty()
                                 )
                             )
                         }
