@@ -6611,17 +6611,23 @@ private fun NewTaskDialog(
                 )
 
                 SectionLabel(npString(R.string.np_abfe09c3932d))
-                Row(Modifier.horizontalScroll(rememberScrollState()), horizontalArrangement = Arrangement.spacedBy(6.dp)) {
-                    listOf(
-                        RuleKind.FIXED to "Uhrzeit",
-                        RuleKind.INTERVAL to npString(R.string.np_6c03c59685ba),
-                        RuleKind.ALLDAY to npString(R.string.np_e5721c734beb),
-                        RuleKind.ONE_TIME to if (npLocale().language == "de") "Einmalig" else "One-time",
-                        RuleKind.WEEKLY to npString(R.string.np_d56d73957fc5)
-                    ).forEach { (k, label) ->
-                        ChoiceChip(label, kind == k, Modifier.width(112.dp)) {
-                            kind = k
-                            triggerHaptic(context, haptic, HapticStyle.TICK)
+                val taskKindOptions = listOf(
+                    RuleKind.FIXED to "Uhrzeit",
+                    RuleKind.INTERVAL to npString(R.string.np_6c03c59685ba),
+                    RuleKind.ALLDAY to npString(R.string.np_e5721c734beb),
+                    RuleKind.ONE_TIME to if (npLocale().language == "de") "Einmalig" else "One-time",
+                    RuleKind.WEEKLY to npString(R.string.np_d56d73957fc5)
+                )
+                Column(verticalArrangement = Arrangement.spacedBy(7.dp)) {
+                    taskKindOptions.chunked(3).forEach { rowItems ->
+                        Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(7.dp)) {
+                            rowItems.forEach { (k, label) ->
+                                ChoiceChip(label, kind == k, Modifier.weight(1f)) {
+                                    kind = k
+                                    triggerHaptic(context, haptic, HapticStyle.TICK)
+                                }
+                            }
+                            repeat(3 - rowItems.size) { Spacer(Modifier.weight(1f)) }
                         }
                     }
                 }
