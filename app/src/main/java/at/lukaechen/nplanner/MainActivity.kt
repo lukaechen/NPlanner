@@ -115,7 +115,7 @@ private val Muted get() = NPlannerAppearance.palette.muted
 private val Red get() = NPlannerAppearance.palette.accent
 
 /** FIXED = feste Uhrzeit, INTERVAL = Zeitabstand mit Von/Bis, ALLDAY = ohne Zeit, WEEKLY = Flexibles Wochenziel (1..14x pro Woche). */
-enum class RuleKind { FIXED, INTERVAL, ALLDAY, WEEKLY }
+enum class RuleKind { FIXED, INTERVAL, ALLDAY, ONE_TIME, WEEKLY }
 
 enum class HapticStyle { TASK_DONE, DAY_COMPLETE, UNDO, TICK }
 
@@ -133,6 +133,8 @@ data class Rule(
     val toMin: Int = 20 * 60,
     val weeklyTarget: Int = 1,
     val createdDate: String = "",
+    val oneTimeDate: String = "",
+    val archived: Boolean = false,
     val optional: Boolean = false
 )
 
@@ -294,6 +296,13 @@ private fun scheduleLabel(r: Rule): String {
         RuleKind.FIXED -> "${fmt(r.timeMin)} · ${dayLabel(r.days)}"
         RuleKind.INTERVAL -> npString(R.string.np_446996825c07 , everyLabel(r.everyMin), fmt(r.fromMin), fmt(r.toMin), dayLabel(r.days))
         RuleKind.WEEKLY -> npString(R.string.np_45a8510351ce , r.weeklyTarget.coerceIn(1, 14))
+        RuleKind.ONE_TIME -> {
+            val due = runCatching { LocalDate.parse(r.oneTimeDate) }.getOrNull()
+            if (due != null) {
+                val prefix = if (due.isBefore(LocalDate.now())) { if (npLocale().language == "de") "Überfällig · " else "Overdue · " } else ""
+                prefix + due.format(DateTimeFormatter.ofPattern("EEE, d. MMM", npLocale()))
+            } else if (npLocale().language == "de") "Einmalig" else "One-time"
+        }
         RuleKind.ALLDAY -> dayLabel(r.days)
     }
     return if (r.optional) npString(R.string.np_2eb32096eb64 , base) else base
@@ -543,6 +552,8 @@ class MainActivity : ComponentActivity() {
                     toMin = o.optInt("to", 20 * 60),
                     weeklyTarget = o.optInt("weeklyTarget", 1).coerceIn(1, 14),
                     createdDate = o.optString("createdDate", ""),
+                    oneTimeDate = o.optString("oneTimeDate", ""),
+                    archived = o.optBoolean("archived", false),
                     optional = o.optBoolean("optional", false)
                 )
             }
@@ -609,6 +620,8 @@ class MainActivity : ComponentActivity() {
                     .put("from", r.fromMin).put("to", r.toMin)
                     .put("weeklyTarget", r.weeklyTarget.coerceIn(1, 14))
                     .put("createdDate", r.createdDate)
+                    .put("oneTimeDate", r.oneTimeDate)
+                    .put("archived", r.archived)
                     .put("optional", r.optional)
             )
         }
@@ -947,10 +960,25 @@ class MainActivity : ComponentActivity() {
         fun doneTodayForWeekly(rule: Rule, d: LocalDate = date): Boolean =
             prefs.getBoolean(weeklyDayKey(rule, d), false)
 
-        val dailyRules = remember(rules, date) {
-            rules.filter { it.kind != RuleKind.WEEKLY && date.dayOfWeek.value in it.days }.sortedBy { sortKey(it) }
+        fun oneTimeDue(rule: Rule): LocalDate? = rule.oneTimeDate.takeIf { it.isNotBlank() }?.let { runCatching { LocalDate.parse(it) }.getOrNull() }
+        LaunchedEffect(date, rules) {
+            val updated = rules.map { rule ->
+                if (rule.kind != RuleKind.ONE_TIME || rule.archived) rule else {
+                    val due = oneTimeDue(rule)
+                    val completedOn = prefs.getString("one_time_done_date:${rule.id}", "").orEmpty().takeIf(String::isNotBlank)?.let { runCatching { LocalDate.parse(it) }.getOrNull() }
+                    if (due != null && due.isBefore(date) && completedOn != null && completedOn.isBefore(date)) rule.copy(archived = true) else rule
+                }
+            }
+            if (updated != rules) { rules = updated; saveRules(updated); tick++ }
         }
-        val weeklyRules = remember(rules) { rules.filter { it.kind == RuleKind.WEEKLY } }
+        val dailyRules = remember(rules, date, tick) {
+            rules.filter { rule ->
+                if (rule.archived || rule.kind == RuleKind.WEEKLY) false
+                else if (rule.kind == RuleKind.ONE_TIME) oneTimeDue(rule)?.let { !date.isBefore(it) } == true
+                else date.dayOfWeek.value in rule.days
+            }.sortedWith(compareBy<Rule> { if (it.kind == RuleKind.ONE_TIME && oneTimeDue(it)?.isBefore(date) == true) 0 else 1 }.thenBy { sortKey(it) })
+        }
+        val weeklyRules = remember(rules) { rules.filter { it.kind == RuleKind.WEEKLY && !it.archived } }
 
         fun weeklyProgressThroughDay(rule: Rule, d: LocalDate): Int {
             val weekStart = d.minusDays((d.dayOfWeek.value - 1).toLong())
@@ -962,7 +990,12 @@ class MainActivity : ComponentActivity() {
         fun daySnapshot(d: LocalDate): DaySnapshot {
             val allDailyForDay = rules.filter { r ->
                 r.kind != RuleKind.WEEKLY &&
-                    d.dayOfWeek.value in r.days &&
+                    (if (r.kind == RuleKind.ONE_TIME) {
+                        val due = oneTimeDue(r)
+                        val completedOn = prefs.getString("one_time_done_date:${r.id}", "").orEmpty()
+                            .takeIf(String::isNotBlank)?.let { runCatching { LocalDate.parse(it) }.getOrNull() }
+                        due != null && !d.isBefore(due) && (completedOn == null || !d.isAfter(completedOn))
+                    } else d.dayOfWeek.value in r.days) &&
                     (r.createdDate.isBlank() || r.createdDate <= d.toString())
             }
             val mandatoryDailyForDay = allDailyForDay.filterNot { it.optional }
@@ -1144,6 +1177,7 @@ class MainActivity : ComponentActivity() {
                 else -> {
                     val wasDone = doneCount(rule) >= totalOf(rule)
                     e.putBoolean("done:${date}:${rule.id}", !wasDone)
+                    if (rule.kind == RuleKind.ONE_TIME) e.putString("one_time_done_date:${rule.id}", if (!wasDone) date.toString() else "")
                     becameDone = !wasDone
                     becameUndone = wasDone
                 }
@@ -1343,7 +1377,7 @@ class MainActivity : ComponentActivity() {
                         )
                         else -> SetupScreen(
                             ndot = ndot,
-                            rules = rules,
+                            rules = rules.filterNot { it.archived },
                             useDotHeadings = dotHeadings,
                             onHeadingStyleChange = { enabled ->
                                 dotHeadings = enabled
@@ -1631,6 +1665,7 @@ private fun TodayScreen(
                         val total = totalOf(rule)
                         val subtitle = when (rule.kind) {
                             RuleKind.INTERVAL -> "Alle ${everyLabel(rule.everyMin)} · ${c}/${total}"
+                            RuleKind.ONE_TIME -> scheduleLabel(rule)
                             else -> dayLabel(rule.days)
                         }
                         val chip = when (rule.kind) {
@@ -1665,6 +1700,7 @@ private fun TodayScreen(
                         val total = totalOf(rule)
                         val subtitle = when (rule.kind) {
                             RuleKind.INTERVAL -> "Optional · Alle ${everyLabel(rule.everyMin)} · ${c}/${total}"
+                            RuleKind.ONE_TIME -> "Optional · ${scheduleLabel(rule)}"
                             else -> "Optional · ${dayLabel(rule.days)}"
                         }
                         val chip = when (rule.kind) {
@@ -6534,6 +6570,7 @@ private fun NewTaskDialog(
     var startMin by remember(initialRule?.id) { mutableIntStateOf(initialRule?.fromMin ?: 8 * 60) }
     var endMin by remember(initialRule?.id) { mutableIntStateOf(initialRule?.toMin ?: 20 * 60) }
     var weeklyTarget by remember(initialRule?.id) { mutableIntStateOf(initialRule?.weeklyTarget ?: 3) }
+    var oneTimeDate by remember(initialRule?.id) { mutableStateOf(initialRule?.oneTimeDate?.takeIf { it.isNotBlank() } ?: LocalDate.now().toString()) }
     var days by remember(initialRule?.id) { mutableStateOf(initialRule?.days ?: (1..7).toSet()) }
     var optional by remember(initialRule?.id) { mutableStateOf(initialRule?.optional ?: false) }
 
@@ -6546,9 +6583,18 @@ private fun NewTaskDialog(
         ).show()
     }
 
+    fun pickDate() {
+        val initial = runCatching { LocalDate.parse(oneTimeDate) }.getOrDefault(LocalDate.now())
+        android.app.DatePickerDialog(context, android.R.style.Theme_DeviceDefault_Dialog_Alert,
+            { _, year, month, day -> oneTimeDate = LocalDate.of(year, month + 1, day).toString() },
+            initial.year, initial.monthValue - 1, initial.dayOfMonth
+        ).apply { datePicker.minDate = System.currentTimeMillis() - 86_400_000L }.show()
+    }
+
     val valid = name.isNotBlank() &&
         (kind != RuleKind.INTERVAL || endMin >= startMin) &&
-        (kind == RuleKind.WEEKLY || days.isNotEmpty())
+        (kind != RuleKind.ONE_TIME || runCatching { LocalDate.parse(oneTimeDate) }.isSuccess) &&
+        (kind == RuleKind.WEEKLY || kind == RuleKind.ONE_TIME || days.isNotEmpty())
     val slotCount = Rule("", "", days, kind = RuleKind.INTERVAL, everyMin = every, fromMin = startMin, toMin = endMin).slots().size
 
     Dialog(onDismissRequest = onDismiss, properties = DialogProperties(usePlatformDefaultWidth = false)) {
@@ -6565,20 +6611,20 @@ private fun NewTaskDialog(
                 )
 
                 SectionLabel(npString(R.string.np_abfe09c3932d))
-                Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                Row(Modifier.horizontalScroll(rememberScrollState()), horizontalArrangement = Arrangement.spacedBy(6.dp)) {
                     listOf(
                         RuleKind.FIXED to "Uhrzeit",
                         RuleKind.INTERVAL to npString(R.string.np_6c03c59685ba),
                         RuleKind.ALLDAY to npString(R.string.np_e5721c734beb),
+                        RuleKind.ONE_TIME to if (npLocale().language == "de") "Einmalig" else "One-time",
                         RuleKind.WEEKLY to npString(R.string.np_d56d73957fc5)
                     ).forEach { (k, label) ->
-                        ChoiceChip(label, kind == k, Modifier.weight(1f)) {
+                        ChoiceChip(label, kind == k, Modifier.width(112.dp)) {
                             kind = k
                             triggerHaptic(context, haptic, HapticStyle.TICK)
                         }
                     }
                 }
-
                 when (kind) {
                     RuleKind.FIXED -> {
                         SectionLabel(npString(R.string.np_b3acd2792395))
@@ -6607,6 +6653,17 @@ private fun NewTaskDialog(
                         )
                     }
                     RuleKind.ALLDAY -> {}
+                    RuleKind.ONE_TIME -> {
+                        SectionLabel(if (npLocale().language == "de") "DATUM" else "DATE")
+                        val due = runCatching { LocalDate.parse(oneTimeDate) }.getOrDefault(LocalDate.now())
+                        Surface(Modifier.fillMaxWidth().clickable { pickDate() }, color = Panel2, shape = RoundedCornerShape(22.dp)) {
+                            Column(Modifier.padding(horizontal = 19.dp, vertical = 14.dp)) {
+                                Text(if (npLocale().language == "de") "Ausführen am" else "Due on", color = Muted, fontSize = 10.sp)
+                                DisplayTitle(due.format(DateTimeFormatter.ofPattern("EEE, d. MMM yyyy", npLocale())), ndot, Modifier.padding(top = 4.dp), 22.sp)
+                            }
+                        }
+                        Text(if (npLocale().language == "de") "Bleibt bei Nichterledigung überfällig. Nach Erledigung wird sie am nächsten Tag automatisch archiviert." else "Stays overdue until completed. After completion it is archived automatically the next day.", color = Muted, fontSize = 11.sp, modifier = Modifier.padding(top = 8.dp))
+                    }
                     RuleKind.WEEKLY -> {
                         SectionLabel(npString(R.string.np_5c4529318bde))
                         Row(
@@ -6632,7 +6689,7 @@ private fun NewTaskDialog(
                     }
                 }
 
-                if (kind != RuleKind.WEEKLY) {
+                if (kind != RuleKind.WEEKLY && kind != RuleKind.ONE_TIME) {
                     SectionLabel(npString(R.string.np_950c2621787f))
                     Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
                         listOf(npString(R.string.np_91e885d8e5af), npString(R.string.np_fe564f789dc6), npString(R.string.np_6b7439b40105), npString(R.string.np_22bdf47be3fd), npString(R.string.np_aa77f314fab0), npString(R.string.np_50cf95cee822), npString(R.string.np_26c0ca793e8f)).forEachIndexed { i, d ->
@@ -6681,13 +6738,15 @@ private fun NewTaskDialog(
                                 Rule(
                                     id = initialRule?.id ?: UUID.randomUUID().toString(),
                                     name = name.trim(),
-                                    days = if (kind == RuleKind.WEEKLY) (1..7).toSet() else days,
+                                    days = if (kind == RuleKind.WEEKLY) (1..7).toSet() else if (kind == RuleKind.ONE_TIME) emptySet() else days,
                                     kind = kind,
                                     timeMin = timeMin,
                                     everyMin = every,
                                     fromMin = startMin,
                                     toMin = endMin,
                                     weeklyTarget = if (kind == RuleKind.WEEKLY) weeklyTarget else 1,
+                                    oneTimeDate = if (kind == RuleKind.ONE_TIME) oneTimeDate else "",
+                                    archived = initialRule?.archived ?: false,
                                     optional = optional,
                                     createdDate = initialRule?.createdDate.orEmpty()
                                 )
