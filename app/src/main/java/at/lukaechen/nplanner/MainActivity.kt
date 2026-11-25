@@ -951,6 +951,13 @@ class MainActivity : ComponentActivity() {
         }
         val weeklyRules = remember(rules) { rules.filter { it.kind == RuleKind.WEEKLY } }
 
+        fun weeklyProgressThroughDay(rule: Rule, d: LocalDate): Int {
+            val weekStart = d.minusDays((d.dayOfWeek.value - 1).toLong())
+            return (0L..(d.dayOfWeek.value - 1).toLong())
+                .count { offset -> prefs.getBoolean(weeklyDayKey(rule, weekStart.plusDays(offset)), false) }
+                .coerceIn(0, totalOf(rule))
+        }
+
         fun daySnapshot(d: LocalDate): DaySnapshot {
             val allDailyForDay = rules.filter { r ->
                 r.kind != RuleKind.WEEKLY &&
@@ -958,27 +965,16 @@ class MainActivity : ComponentActivity() {
                     (r.createdDate.isBlank() || r.createdDate <= d.toString())
             }
             val mandatoryDailyForDay = allDailyForDay.filterNot { it.optional }
-
+            // A weekly goal contributes only on days where an occurrence was completed.
+            // The calendar stores the actual weekly progress (e.g. 1/4), not 1/1.
             val weeklyDoneOnDay = weeklyRules.filter { doneTodayForWeekly(it, d) }
             val mandatoryWeeklyDoneOnDay = weeklyDoneOnDay.filterNot { it.optional }
-
-            val activeMandatoryWeeklyOnDay = if (d == date) {
-                weeklyRules.filter { !it.optional && (doneTodayForWeekly(it, d) || doneCount(it, d) < totalOf(it)) }
-            } else {
-                mandatoryWeeklyDoneOnDay
-            }
-
             val doneDaily = mandatoryDailyForDay.count { doneCount(it, d) >= totalOf(it) }
-            val doneWeekly = if (d == date) {
-                activeMandatoryWeeklyOnDay.count { doneTodayForWeekly(it, d) }
-            } else {
-                mandatoryWeeklyDoneOnDay.size
-            }
-            val total = mandatoryDailyForDay.size + activeMandatoryWeeklyOnDay.size
-            val done = doneDaily + doneWeekly
+            val doneWeekly = mandatoryWeeklyDoneOnDay.sumOf { weeklyProgressThroughDay(it, d) }
+            val total = mandatoryDailyForDay.size + mandatoryWeeklyDoneOnDay.sumOf { totalOf(it) }
             return DaySnapshot(
                 date = d,
-                done = done,
+                done = doneDaily + doneWeekly,
                 total = total,
                 dailyRules = allDailyForDay,
                 weeklyDoneRules = weeklyDoneOnDay
@@ -992,7 +988,13 @@ class MainActivity : ComponentActivity() {
                 items.put(JSONArray().put(r.name).put(doneCount(r, d)).put(totalOf(r)).put(if (r.optional) 1 else 0))
             }
             snap.weeklyDoneRules.forEach { r ->
-                items.put(JSONArray().put("${r.name} (Wochenziel)").put(1).put(1).put(if (r.optional) 1 else 0))
+                items.put(
+                    JSONArray()
+                        .put("${r.name} (Wochenziel)")
+                        .put(weeklyProgressThroughDay(r, d))
+                        .put(totalOf(r))
+                        .put(if (r.optional) 1 else 0)
+                )
             }
             val obj = JSONObject().put("done", snap.done).put("total", snap.total).put("items", items)
             prefs.edit().putString("snap:${d}", obj.toString()).apply()
@@ -1017,7 +1019,13 @@ class MainActivity : ComponentActivity() {
                             items.put(JSONArray().put(r.name).put(doneCount(r, d)).put(totalOf(r)).put(if (r.optional) 1 else 0))
                         }
                         snap.weeklyDoneRules.forEach { r ->
-                            items.put(JSONArray().put("${r.name} (Wochenziel)").put(1).put(1).put(if (r.optional) 1 else 0))
+                            items.put(
+                    JSONArray()
+                        .put("${r.name} (Wochenziel)")
+                        .put(weeklyProgressThroughDay(r, d))
+                        .put(totalOf(r))
+                        .put(if (r.optional) 1 else 0)
+                )
                         }
                         prefs.edit().putString("snap:${d}", obj.put("items", items).toString()).apply()
                     }
@@ -1039,10 +1047,29 @@ class MainActivity : ComponentActivity() {
                     val items = if (arr == null) emptyList() else (0 until arr.length()).mapNotNull { i ->
                         runCatching {
                             val a = arr.getJSONArray(i)
-                            HistoricalTask(a.getString(0), a.getInt(1), a.getInt(2), a.optInt(3) == 1)
+                            val storedName = a.getString(0)
+                            val storedDone = a.getInt(1)
+                            val storedTarget = a.getInt(2)
+                            // Repair calendar snapshots from older builds that stored a
+                            // weekly occurrence as 1/1 rather than its real x/target value.
+                            val weeklyRule = if (storedTarget == 1 && storedName.endsWith(" (Wochenziel)")) {
+                                weeklyRules.firstOrNull { it.name == storedName.removeSuffix(" (Wochenziel)") }
+                            } else null
+                            HistoricalTask(
+                                name = storedName,
+                                done = weeklyRule?.let { weeklyProgressThroughDay(it, d) } ?: storedDone,
+                                target = weeklyRule?.let(::totalOf) ?: storedTarget,
+                                optional = a.optInt(3) == 1
+                            )
                         }.getOrNull()
                     }
-                    live.copy(done = sDone, total = sTotal, historicalTasks = items)
+                    val repairedDone = if (items.isNotEmpty()) {
+                        items.filterNot { it.optional }.sumOf { it.done.coerceAtMost(it.target) }
+                    } else sDone
+                    val repairedTotal = if (items.isNotEmpty()) {
+                        items.filterNot { it.optional }.sumOf { it.target }
+                    } else sTotal
+                    live.copy(done = repairedDone, total = repairedTotal, historicalTasks = items)
                 }.getOrNull()
                 if (parsed != null) return parsed
             }
@@ -2904,6 +2931,9 @@ private fun TrainingScreen(
             resultPrefs.edit().putString("workout_session:${classicRunId}", result.toString()).apply()
             resultRevision++
             selectedWorkoutResult = result
+            // Completed sessions move to history. Reusable configurations are kept only
+            // when the user explicitly saved them as workout_template:*.
+            onDeleteWorkout(finishedWorkout.id)
         }
         amrapWorkoutId = null
         sessionPrefs.edit().remove("amrap_workout").apply()
