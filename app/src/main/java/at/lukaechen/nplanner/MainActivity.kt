@@ -526,7 +526,7 @@ private fun exportNpefJson(exercises: List<Exercise>): String {
 }
 
 class MainActivity : ComponentActivity() {
-    private val prefs by lazy { getSharedPreferences("nplanner-v2", MODE_PRIVATE) }
+    private val prefs by lazy { NPlannerStore.get(this) }
 
     private fun loadRules(): List<Rule> = try {
         val raw = prefs.getString("rules", null)
@@ -859,7 +859,7 @@ class MainActivity : ComponentActivity() {
         super.onCreate(savedInstanceState)
         NPlannerAppearance.initialize(this)
         seedEditableWorkoutTemplates(this)
-        NPlannerRoomBridge.start(applicationContext, prefs)
+        // Room is now the primary and only user-data store.
         setContent {
             val ndot = FontFamily(androidx.compose.ui.text.font.Font(resId = R.font.ndot_47))
             // NType 82 is supplied separately as app/src/main/res/font/ntype_82.ttf.
@@ -1326,7 +1326,7 @@ class MainActivity : ComponentActivity() {
                                 triggerHaptic(context, haptic, HapticStyle.UNDO)
                             },
                             onLogSet = { newLog ->
-                                val session = context.getSharedPreferences("nplanner-training-session", Context.MODE_PRIVATE)
+                                val session = NPlannerStore.get(context)
                                 val activeId = session.getString("active_workout", null)
                                 if (newLog.workoutId.isNotBlank() && newLog.workoutId == activeId) {
                                     val runId = session.getString("classic_run_id", null)
@@ -2873,7 +2873,7 @@ private fun TrainingScreen(
     val context = LocalContext.current
     // 0 = Workouts (Hauptfokus), 1 = Uebungen, 2 = Rekorde
     var subPage by remember { mutableIntStateOf(0) }
-    val resultPrefs = remember { context.getSharedPreferences("nplanner-v2", Context.MODE_PRIVATE) }
+    val resultPrefs = remember { NPlannerStore.get(context) }
     var resultRevision by remember { mutableIntStateOf(0) }
     var selectedAmrapResult by remember { mutableStateOf<JSONObject?>(null) }
     var exerciseQuery by remember { mutableStateOf("") }
@@ -2910,7 +2910,7 @@ private fun TrainingScreen(
         if (group != 0) group else exerciseComparator.compare(a.name, b.name) * if (exerciseDescending) -1 else 1
     })
 
-    val sessionPrefs = remember { context.getSharedPreferences("nplanner-training-session", Context.MODE_PRIVATE) }
+    val sessionPrefs = remember { NPlannerStore.get(context) }
     var activeWorkoutSessionId by remember { mutableStateOf(sessionPrefs.getString("active_workout", null)) }
     var sessionStartedAt by remember { mutableStateOf(sessionPrefs.getLong("started_at", 0L)) }
     var classicRunId by remember {
@@ -4016,7 +4016,7 @@ private fun AmrapLiveDialog(
     onHapticTick: () -> Unit
 ) {
     val context = LocalContext.current
-    val resultPrefs = remember { context.getSharedPreferences("nplanner-v2", Context.MODE_PRIVATE) }
+    val resultPrefs = remember { NPlannerStore.get(context) }
     val prefix = "amrap:${workout.id}:"
     val durationMs = workout.durationSeconds.coerceAtLeast(1) * 1000L
     var index by remember(workout.id) { mutableIntStateOf(prefs.getInt(prefix + "index", 0)) }
@@ -4633,7 +4633,7 @@ private fun savePersonalWorkoutTemplate(context: Context, workout: Workout, exer
         .put("kind", workout.kind.name).put("duration", workout.durationSeconds)
         .put("sourceIds", JSONArray(chosen.map { it.id }))
         .put("catalog", JSONObject(exportNpefJson(chosen)))
-    context.getSharedPreferences("nplanner-v2", Context.MODE_PRIVATE).edit()
+    NPlannerStore.get(context).edit()
         .putString(templateKey ?: ("workout_template:" + UUID.randomUUID().toString()), obj.toString()).apply()
 }
 
@@ -4682,7 +4682,7 @@ private val workoutPresets = listOf(
 )
 
 private fun seedEditableWorkoutTemplates(context: Context) {
-    val prefs = context.getSharedPreferences("nplanner-v2", Context.MODE_PRIVATE)
+    val prefs = NPlannerStore.get(context)
     if (prefs.getBoolean("editable_template_catalog_v43", false)) return
     workoutPresets.forEachIndexed { index, preset ->
         val existing = prefs.all.filterKeys { it.startsWith("workout_template:") }.values.any { raw ->
@@ -4822,7 +4822,7 @@ private fun WorkoutEditorDialog(
     var saveAsTemplate by remember { mutableStateOf(false) }
     var selectedWeights by remember { mutableStateOf(initialWeights) }
     var pendingPresetExercises by remember { mutableStateOf<List<Exercise>>(emptyList()) }
-    val personalPrefs = remember { context.getSharedPreferences("nplanner-v2", Context.MODE_PRIVATE) }
+    val personalPrefs = remember { NPlannerStore.get(context) }
     var personalRevision by remember { mutableIntStateOf(0) }
     val personalTemplates = remember(personalRevision) {
         personalPrefs.all.filterKeys { it.startsWith("workout_template:") }.mapNotNull { (key, value) ->
