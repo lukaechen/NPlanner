@@ -17,42 +17,35 @@ android {
         versionName = "0.44"
     }
 
-    val releaseStoreFile = System.getenv("NPLANNER_KEYSTORE_PATH")
-    val releaseStorePassword = System.getenv("NPLANNER_KEYSTORE_PASSWORD")
-    val releaseKeyAlias = System.getenv("NPLANNER_KEY_ALIAS")
-    val releaseKeyPassword = System.getenv("NPLANNER_KEY_PASSWORD")
-    val hasReleaseSigning = listOf(
-        releaseStoreFile,
-        releaseStorePassword,
-        releaseKeyAlias,
-        releaseKeyPassword
-    ).all { !it.isNullOrBlank() }
-
     signingConfigs {
-        if (hasReleaseSigning) {
-            create("release") {
-                storeFile = file(releaseStoreFile!!)
-                storePassword = releaseStorePassword
-                keyAlias = releaseKeyAlias
-                keyPassword = releaseKeyPassword
-            }
+        create("release") {
+            storeFile = file(
+                System.getenv("NPLANNER_KEYSTORE_PATH")
+                    ?: error("NPLANNER_KEYSTORE_PATH fehlt")
+            )
+            storePassword = System.getenv("NPLANNER_KEYSTORE_PASSWORD")
+                ?: error("NPLANNER_KEYSTORE_PASSWORD fehlt")
+            keyAlias = System.getenv("NPLANNER_KEY_ALIAS")
+                ?: error("NPLANNER_KEY_ALIAS fehlt")
+            keyPassword = System.getenv("NPLANNER_KEY_PASSWORD")
+                ?: error("NPLANNER_KEY_PASSWORD fehlt")
         }
     }
 
     buildTypes {
         getByName("release") {
             isMinifyEnabled = false
-            if (hasReleaseSigning) {
-                signingConfig = signingConfigs.getByName("release")
-            }
+            signingConfig = signingConfigs.getByName("release")
         }
     }
 
     buildFeatures { compose = true }
+
     compileOptions {
         sourceCompatibility = JavaVersion.VERSION_17
         targetCompatibility = JavaVersion.VERSION_17
     }
+
     kotlinOptions { jvmTarget = "17" }
 }
 
