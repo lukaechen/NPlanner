@@ -114,7 +114,7 @@ private val White get() = NPlannerAppearance.palette.foreground
 private val Muted get() = NPlannerAppearance.palette.muted
 private val Red get() = NPlannerAppearance.palette.accent
 
-private const val NPLANNER_VERSION = "0.52"
+private const val NPLANNER_VERSION = "0.53"
 
 /** FIXED = feste Uhrzeit, INTERVAL = Zeitabstand mit Von/Bis, ALLDAY = ohne Zeit, WEEKLY = Flexibles Wochenziel (1..14x pro Woche). */
 enum class RuleKind { FIXED, INTERVAL, ALLDAY, ONE_TIME, WEEKLY }
@@ -359,19 +359,19 @@ private fun triggerHaptic(
                 when (style) {
                     HapticStyle.DAY_COMPLETE -> {
                         val timings = longArrayOf(0L, 45L, 65L, 95L)
-                        val amplitudes = intArrayOf(0, 175, 0, 255)
+                        val amplitudes = intArrayOf(0, 190, 0, 255)
                         vibrator.vibrate(VibrationEffect.createWaveform(timings, amplitudes, -1))
                     }
                     HapticStyle.TASK_DONE -> {
-                        vibrator.vibrate(VibrationEffect.createOneShot(26L, 100))
+                        vibrator.vibrate(VibrationEffect.createOneShot(34L, 155))
                     }
                     HapticStyle.UNDO -> {
                         val timings = longArrayOf(0L, 18L, 38L, 14L)
-                        val amplitudes = intArrayOf(0, 80, 0, 50)
+                        val amplitudes = intArrayOf(0, 115, 0, 75)
                         vibrator.vibrate(VibrationEffect.createWaveform(timings, amplitudes, -1))
                     }
                     HapticStyle.TICK -> {
-                        vibrator.vibrate(VibrationEffect.createOneShot(12L, 55))
+                        vibrator.vibrate(VibrationEffect.createOneShot(16L, 80))
                     }
                 }
             } else {
@@ -883,7 +883,7 @@ class MainActivity : ComponentActivity() {
                 @Suppress("DEPRECATION")
                 window.statusBarColor = NPlannerAppearance.palette.background.toArgb()
                 @Suppress("DEPRECATION")
-                window.navigationBarColor = NPlannerAppearance.palette.background.toArgb()
+                window.navigationBarColor = Color.Transparent.toArgb()
                 androidx.core.view.WindowCompat.getInsetsController(window, window.decorView).apply {
                     isAppearanceLightStatusBars = !effectiveDark
                     isAppearanceLightNavigationBars = !effectiveDark
@@ -1560,7 +1560,7 @@ private fun Screen(
         .statusBarsPadding()
         .padding(horizontal = 22.dp)
         .padding(top = if (compactHeader) 8.dp else 12.dp, bottom = if (compactHeader) 92.dp else 102.dp)
-    Column(if (scrollable) base.verticalScroll(LocalPageScroll.current ?: rememberScrollState()) else base) {
+    Column(if (scrollable) base.imePadding().verticalScroll(LocalPageScroll.current ?: rememberScrollState()) else base) {
         Row(verticalAlignment = Alignment.CenterVertically) {
             Box(Modifier.size(6.dp).background(Red, CircleShape))
             Spacer(Modifier.width(9.dp))
@@ -1762,59 +1762,48 @@ private fun TodayScreen(
 
 @Composable
 private fun ProgressBars(done: Int, total: Int, ndot: FontFamily) {
-    val animatedDone by animateFloatAsState(targetValue = done.toFloat(),
-        animationSpec = spring(dampingRatio = Spring.DampingRatioNoBouncy, stiffness = Spring.StiffnessLow),
-        label = "bar_progress")
+    val animatedDone by animateFloatAsState(done.toFloat(),
+        spring(dampingRatio = Spring.DampingRatioNoBouncy, stiffness = Spring.StiffnessLow), label = "bar_progress")
     val completed = total > 0 && done >= total
-    val pulse = remember { Animatable(0f) }
+    val finish = remember { Animatable(1f) }
     LaunchedEffect(completed) {
         if (completed) {
-            pulse.snapTo(0f)
-            pulse.animateTo(1f, tween(620, easing = FastOutSlowInEasing))
+            finish.snapTo(0f)
+            finish.animateTo(1f, tween(1450, easing = FastOutSlowInEasing))
         }
     }
     Column(Modifier.fillMaxWidth()) {
-        Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.Bottom,
-            horizontalArrangement = Arrangement.SpaceBetween) {
+        Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.Bottom, horizontalArrangement = Arrangement.SpaceBetween) {
             DisplayCount(done, total, ndot, 84.sp)
             Text(if (completed) npString(R.string.np_595b69683dcf) else npString(R.string.np_71f43d0f0475),
                 color = Muted, fontFamily = FontFamily.Default, fontSize = 10.sp, letterSpacing = 2.sp,
                 modifier = Modifier.padding(bottom = 6.dp))
         }
-        Spacer(Modifier.height(18.dp))
-        Box(Modifier.fillMaxWidth().height(30.dp), contentAlignment = Alignment.Center) {
+        Spacer(Modifier.height(16.dp))
+        Box(Modifier.fillMaxWidth().height(42.dp), contentAlignment = Alignment.Center) {
             Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(if (total > 10) 3.dp else 6.dp)) {
                 repeat(total.coerceAtLeast(1)) { i ->
-                    val fill = if (total == 0) 1f else (animatedDone - i).coerceIn(0f, 1f)
-                    Box(Modifier.weight(1f).height(10.dp).clip(RoundedCornerShape(5.dp))
+                    val fill = if (total == 0) 1f else (animatedDone - i).coerceIn(0f,1f)
+                    val wave = if (completed) ((finish.value * (total + 2)) - i).coerceIn(0f,1f) else 0f
+                    Box(Modifier.weight(1f).height((10 + wave * 6).dp).clip(RoundedCornerShape(8.dp))
                         .background(npNeutral(0xFF2A2A2A))) {
-                        Box(Modifier.fillMaxHeight().fillMaxWidth(fill).background(White, RoundedCornerShape(5.dp)))
+                        Box(Modifier.fillMaxHeight().fillMaxWidth(fill).background(
+                            if (wave > .05f && wave < .95f) Red else White, RoundedCornerShape(8.dp)))
                     }
                 }
             }
-            if (completed && pulse.value < 1f) {
-                Canvas(Modifier.fillMaxSize()) {
-                    val p = pulse.value
-                    val x = size.width * p
-                    drawRoundRect(
-                        color = Red.copy(alpha = (1f - p) * .75f),
-                        topLeft = Offset((x - 22.dp.toPx()).coerceAtLeast(0f), size.height/2f - 6.dp.toPx()),
-                        size = Size(44.dp.toPx(), 12.dp.toPx()),
-                        cornerRadius = CornerRadius(6.dp.toPx())
-                    )
-                    val seed = listOf(.12f,.25f,.40f,.57f,.73f,.88f)
-                    seed.forEachIndexed { idx, f ->
-                        val local = ((p - f) * 4f).coerceIn(0f,1f)
-                        if (local > 0f && local < 1f) {
-                            val px = size.width*f
-                            val dir = if (idx % 2 == 0) -1f else 1f
-                            drawCircle(
-                                color = if (idx % 3 == 0) Red else White,
-                                radius = (2.2f - local).coerceAtLeast(.7f).dp.toPx(),
-                                center = Offset(px + dir*local*12.dp.toPx(), size.height/2f + dir*local*10.dp.toPx()),
-                                alpha = 1f-local
-                            )
-                        }
+            if (completed && finish.value < .92f) Canvas(Modifier.fillMaxSize()) {
+                val p=finish.value; val head=(size.width*(p*1.14f-.07f)).coerceIn(0f,size.width)
+                drawLine(White.copy(alpha=(1f-p)*.65f),Offset(head-42.dp.toPx(),size.height/2),Offset(head,size.height/2),
+                    2.dp.toPx(),StrokeCap.Round)
+                repeat(18) { i ->
+                    val birth=i/22f; val q=((p-birth)*2.1f).coerceIn(0f,1f)
+                    if(q>0f && q<1f){
+                        val x=size.width*birth + kotlin.math.sin(i*2.7).toFloat()*q*16.dp.toPx()
+                        val direction=if(i%2==0)-1f else 1f
+                        val y=size.height/2 + direction*(5.dp.toPx()+q*17.dp.toPx())
+                        if(i%3==0) drawRoundRect(Red.copy(alpha=1f-q),Offset(x,y),Size(5.dp.toPx(),2.dp.toPx()),CornerRadius(1.dp.toPx()))
+                        else drawCircle(White.copy(alpha=1f-q),if(i%4==0)2.dp.toPx() else 1.2.dp.toPx(),Offset(x,y))
                     }
                 }
             }
@@ -1838,7 +1827,7 @@ private fun ProgressOrbit(
     LaunchedEffect(complete) {
         if (complete) {
             celebration.snapTo(0f)
-            celebration.animateTo(1f, tween(900, easing = FastOutSlowInEasing))
+            celebration.animateTo(1f, tween(1850, easing = FastOutSlowInEasing))
         }
     }
     Box(Modifier.fillMaxWidth().height(boxHeight), contentAlignment = Alignment.Center) {
@@ -1881,28 +1870,36 @@ private fun ProgressOrbit(
                 )
             }
         }
-        if (complete && celebration.value < .74f) {
-            val pop = (celebration.value / .28f).coerceIn(0f,1f)
+        if (complete && celebration.value < .88f) {
+            val pop = (celebration.value / .38f).coerceIn(0f,1f)
             Canvas(Modifier.size(ringSize)) {
                 val center = Offset(size.width/2f,size.height/2f)
-                val scale = 0.75f + .25f * kotlin.math.sin(pop * Math.PI.toFloat()/2f)
-                val c = Path().apply {
-                    moveTo(center.x-size.width*.13f*scale, center.y)
-                    lineTo(center.x-size.width*.025f*scale, center.y+size.height*.105f*scale)
-                    lineTo(center.x+size.width*.17f*scale, center.y-size.height*.13f*scale)
+                val dot = 3.2.dp.toPx()
+                val pattern = listOf(
+                    -4 to 0, -3 to 1, -2 to 2, -1 to 3,
+                    0 to 2, 1 to 1, 2 to 0, 3 to -1, 4 to -2, 5 to -3
+                )
+                val visible = (pattern.size * pop).toInt().coerceIn(0, pattern.size)
+                val scale = .72f + .36f * kotlin.math.sin(pop * Math.PI.toFloat()/2f)
+                pattern.take(visible).forEachIndexed { index, pair ->
+                    val x=center.x + pair.first*dot*1.55f*scale
+                    val y=center.y + pair.second*dot*1.55f*scale
+                    drawCircle(if(index==visible-1) Red else White,dot*.48f,Offset(x,y))
                 }
-                drawPath(c, White, style=Stroke(5.dp.toPx(), cap=StrokeCap.Round, join=StrokeJoin.Round))
-                val burst=((celebration.value-.12f)/.48f).coerceIn(0f,1f)
-                repeat(12) { i ->
-                    val a=(i*30.0-90.0)*Math.PI/180.0
-                    val r=size.minDimension*(.24f+.23f*burst)
+                val burst=((celebration.value-.20f)/.58f).coerceIn(0f,1f)
+                repeat(20) { i ->
+                    val a=(i*18.0-90.0)*Math.PI/180.0
+                    val stagger=(i%5)*.045f
+                    val q=((burst-stagger)/(1f-stagger)).coerceIn(0f,1f)
+                    val r=size.minDimension*(.20f+.34f*q)
                     val x=center.x+kotlin.math.cos(a).toFloat()*r
                     val y=center.y+kotlin.math.sin(a).toFloat()*r
-                    val len=(5f+if(i%3==0)5f else 0f).dp.toPx()*(1f-burst*.35f)
-                    val dx=kotlin.math.cos(a).toFloat()*len; val dy=kotlin.math.sin(a).toFloat()*len
-                    drawLine(if(i%4==0) Red else White,Offset(x-dx/2,y-dy/2),Offset(x+dx/2,y+dy/2),
-                        if(i%3==0) 2.5.dp.toPx() else 1.7.dp.toPx(),StrokeCap.Round,alpha=1f-burst)
+                    val alpha=(1f-q).coerceIn(0f,1f)
+                    if(i%4==0) drawRoundRect(Red.copy(alpha=alpha),Offset(x-3.dp.toPx(),y-1.dp.toPx()),Size(6.dp.toPx(),2.dp.toPx()),CornerRadius(1.dp.toPx()))
+                    else drawCircle(White.copy(alpha=alpha),if(i%3==0)2.dp.toPx() else 1.25.dp.toPx(),Offset(x,y))
                 }
+                val ringPulse=((celebration.value-.05f)/.65f).coerceIn(0f,1f)
+                drawCircle(White.copy(alpha=(1f-ringPulse)*.28f),size.minDimension*(.22f+.22f*ringPulse),center,style=Stroke(1.5.dp.toPx()))
             }
         } else {
             Column(horizontalAlignment = Alignment.CenterHorizontally) {
@@ -4009,7 +4006,7 @@ private fun AmrapSummaryDialog(result: JSONObject, ndot: FontFamily, onDelete: (
     Dialog(onDismissRequest = onClose, properties = DialogProperties(usePlatformDefaultWidth = false)) {
         Surface(Modifier.fillMaxWidth().padding(horizontal = 14.dp), color = Panel,
             shape = RoundedCornerShape(28.dp)) {
-            Column(Modifier.padding(18.dp).heightIn(max = 610.dp).verticalScroll(rememberScrollState())) {
+            Column(Modifier.padding(18.dp).heightIn(max = 610.dp).imePadding().verticalScroll(rememberScrollState())) {
                 Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
                     Box(Modifier.size(7.dp).background(Red, CircleShape))
                     Spacer(Modifier.width(9.dp))
@@ -4349,7 +4346,7 @@ private fun WorkoutSessionSummary(
     val height = androidx.compose.ui.platform.LocalConfiguration.current.screenHeightDp.dp * .85f
     Dialog(onDismissRequest = onClose, properties = DialogProperties(usePlatformDefaultWidth = false)) {
         Surface(Modifier.fillMaxWidth().padding(16.dp).height(height), color = Panel, shape = RoundedCornerShape(28.dp)) {
-            Column(Modifier.padding(18.dp)) {
+            Column(Modifier.padding(18.dp).imePadding()) {
                 Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
                     Text(npString(R.string.np_47dfd446bfe8), color = Red, fontSize = 10.sp, modifier = Modifier.weight(1f))
                     if (onDelete != null) IconButton(onClick = onDelete,
@@ -4711,7 +4708,7 @@ private fun WorkoutSheetDialog(
                     color = Muted, fontSize = 10.sp, modifier = Modifier.padding(top = 9.dp, bottom = 10.dp))
                 Column(
                     Modifier.weight(1f).fillMaxWidth()
-                        .onGloballyPositioned { coords ->
+                        .imePadding().onGloballyPositioned { coords ->
                             viewportTop = coords.positionInRoot().y
                             viewportBottom = viewportTop + coords.size.height
                         }.verticalScroll(scroll),
@@ -5011,7 +5008,7 @@ private fun WorkoutEditorDialog(
             color = Panel,
             shape = RoundedCornerShape(28.dp)
         ) {
-            Column(Modifier.verticalScroll(rememberScrollState()).padding(22.dp)) {
+            Column(Modifier.imePadding().verticalScroll(rememberScrollState()).padding(22.dp)) {
                 Text(npString(R.string.np_365b02b7539f), color = Red, fontSize = 10.sp,
                     fontFamily = FontFamily.Default, letterSpacing = 1.3.sp)
                 Spacer(Modifier.height(6.dp))
@@ -5295,7 +5292,7 @@ private fun ExerciseDetailDialog(
             color = Panel,
             shape = RoundedCornerShape(28.dp)
         ) {
-            Column(Modifier.verticalScroll(rememberScrollState()).padding(22.dp)) {
+            Column(Modifier.imePadding().verticalScroll(rememberScrollState()).padding(22.dp)) {
                 Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
                     Text(exerciseKindLabel(exercise.kind).uppercase(npLocale()), color = Red,
                         fontFamily = FontFamily.Default, fontSize = 10.sp, modifier = Modifier.weight(1f))
@@ -5758,7 +5755,7 @@ private fun NewExerciseDialog(
             color = Panel,
             shape = RoundedCornerShape(28.dp)
         ) {
-            Column(Modifier.verticalScroll(rememberScrollState()).padding(22.dp)) {
+            Column(Modifier.imePadding().verticalScroll(rememberScrollState()).padding(22.dp)) {
                 DisplayTitle(if (initialExercise == null) npString(R.string.np_12b67bb6f916) else npString(R.string.np_e3417b4e7753), ndot, fontSize = 24.sp)
                 if (!targetWorkoutName.isNullOrBlank()) {
                     Spacer(Modifier.height(4.dp))
@@ -6035,7 +6032,7 @@ private fun AiExerciseImportDialog(
             color = Panel,
             shape = RoundedCornerShape(28.dp)
         ) {
-            Column(Modifier.verticalScroll(rememberScrollState()).padding(22.dp)) {
+            Column(Modifier.imePadding().verticalScroll(rememberScrollState()).padding(22.dp)) {
                 DisplayTitle(npString(R.string.np_f330ec3da298), ndot, fontSize = 24.sp)
                 Spacer(Modifier.height(6.dp))
                 Text(
@@ -6123,6 +6120,8 @@ private fun GlyphNav(
     modifier: Modifier
 ) {
     val glyphs = listOf(NavGlyph.TODAY, NavGlyph.HISTORY, NavGlyph.TRAINING, NavGlyph.SETUP)
+    val navHaptic = LocalHapticFeedback.current
+    val navContext = LocalContext.current
 
     val targetFraction = if (directTarget != null) {
         directTarget.toFloat()
@@ -6142,13 +6141,14 @@ private fun GlyphNav(
     Surface(
         modifier = modifier
             .navigationBarsPadding()
-            .padding(horizontal = 38.dp, vertical = 14.dp)
-            .widthIn(max = 330.dp)
+            .padding(horizontal = 52.dp, vertical = 10.dp)
+            .widthIn(max = 286.dp)
             .fillMaxWidth()
-            .height(62.dp),
-        color = npNeutral(0xE6252525),
-        shape = RoundedCornerShape(34.dp),
-        shadowElevation = 14.dp
+            .height(58.dp),
+        color = Color(0xB8323232),
+        shape = RoundedCornerShape(31.dp),
+        border = androidx.compose.foundation.BorderStroke(1.dp, White.copy(alpha = .16f)),
+        shadowElevation = 6.dp
     ) {
         BoxWithConstraints(
             modifier = Modifier
@@ -6196,7 +6196,10 @@ private fun GlyphNav(
                             .clickable(
                                 interactionSource = interactionSource,
                                 indication = null
-                            ) { select(i) },
+                            ) {
+                                    triggerHaptic(navContext, navHaptic, HapticStyle.TICK)
+                                    select(i)
+                                },
                         contentAlignment = Alignment.Center
                     ) {
                         Box(
@@ -6732,7 +6735,7 @@ private fun NewTaskDialog(
 
     Dialog(onDismissRequest = onDismiss, properties = DialogProperties(usePlatformDefaultWidth = false)) {
         Surface(modifier = Modifier.padding(horizontal = 16.dp).fillMaxWidth(), color = Panel, shape = RoundedCornerShape(28.dp)) {
-            Column(Modifier.verticalScroll(rememberScrollState()).padding(22.dp)) {
+            Column(Modifier.imePadding().verticalScroll(rememberScrollState()).padding(22.dp)) {
                 DisplayTitle(if (initialRule == null) npString(R.string.np_060813ffb8c9) else "AUFGABE BEARBEITEN", ndot, fontSize = 24.sp)
                 Spacer(Modifier.height(14.dp))
                 OutlinedTextField(
