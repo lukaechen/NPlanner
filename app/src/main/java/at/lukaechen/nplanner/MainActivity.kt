@@ -127,7 +127,7 @@ private val White get() = NPlannerAppearance.palette.foreground
 private val Muted get() = NPlannerAppearance.palette.muted
 private val Red get() = NPlannerAppearance.palette.accent
 
-private const val NPLANNER_VERSION = "0.61"
+private const val NPLANNER_VERSION = "0.62"
 
 /** FIXED = feste Uhrzeit, INTERVAL = Zeitabstand mit Von/Bis, ALLDAY = ohne Zeit, WEEKLY = Flexibles Wochenziel (1..14x pro Woche). */
 enum class RuleKind { FIXED, INTERVAL, ALLDAY, ONE_TIME, WEEKLY }
@@ -1672,9 +1672,11 @@ private fun DisplayCount(done: Int, total: Int, ndot: FontFamily, fontSize: Text
     val digitSlots = maxOf(1, total.toString().length, done.toString().length)
     val measurer = rememberTextMeasurer()
     val density = LocalDensity.current
+    // The classic font needs its natural line metrics before the slots are clipped.
     val digitStyle = TextStyle(fontFamily = family, fontWeight = weight, fontSize = fontSize,
-        lineHeight = fontSize, letterSpacing = spacing, fontFeatureSettings = "tnum",
-        platformStyle = PlatformTextStyle(includeFontPadding = false))
+        lineHeight = if (useDot) fontSize else TextUnit.Unspecified,
+        letterSpacing = spacing, fontFeatureSettings = "tnum",
+        platformStyle = PlatformTextStyle(includeFontPadding = !useDot))
     val slashStyle = digitStyle.copy(letterSpacing = 0.sp)
     val numberWidth = with(density) {
         ('0'..'9').maxOf { measurer.measure(it.toString(), style = digitStyle, maxLines = 1).size.width }
@@ -1684,25 +1686,23 @@ private fun DisplayCount(done: Int, total: Int, ndot: FontFamily, fontSize: Text
         measurer.measure("/", style = slashStyle, maxLines = 1).size.width.toDp() +
             fontSize.toPx().toDp() * (if (useDot) .30f else .14f)
     }
+    val verticalInset = if (useDot) 0.dp else 2.dp
     Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.Center) {
-        Box(Modifier.width(numberWidth).clipToBounds(), contentAlignment = Alignment.CenterEnd) {
-            Text(done.toString(), color = White, fontFamily = family, fontWeight = weight,
-                fontSize = fontSize, lineHeight = fontSize, letterSpacing = spacing,
-                maxLines = 1, softWrap = false, style = TextStyle(fontFeatureSettings = "tnum",
-                    platformStyle = PlatformTextStyle(includeFontPadding = false)))
+        Box(Modifier.width(numberWidth).clipToBounds().padding(vertical = verticalInset),
+            contentAlignment = Alignment.CenterEnd) {
+            Text(done.toString(), color = White, style = digitStyle, maxLines = 1, softWrap = false)
         }
-        Box(Modifier.width(slashWidth).clipToBounds(), contentAlignment = Alignment.Center) {
+        Box(Modifier.width(slashWidth).clipToBounds().padding(vertical = verticalInset),
+            contentAlignment = Alignment.Center) {
             Text("/", color = npNeutral(0xFF5A5A5A), style = slashStyle, maxLines = 1, softWrap = false)
         }
-        Box(Modifier.width(numberWidth).clipToBounds(), contentAlignment = Alignment.CenterStart) {
-            Text(total.toString(), color = npNeutral(0xFF5A5A5A), fontFamily = family,
-                fontWeight = weight, fontSize = fontSize, lineHeight = fontSize,
-                letterSpacing = spacing, maxLines = 1, softWrap = false,
-                style = TextStyle(fontFeatureSettings = "tnum",
-                    platformStyle = PlatformTextStyle(includeFontPadding = false)))
+        Box(Modifier.width(numberWidth).clipToBounds().padding(vertical = verticalInset),
+            contentAlignment = Alignment.CenterStart) {
+            Text(total.toString(), color = npNeutral(0xFF5A5A5A), style = digitStyle, maxLines = 1, softWrap = false)
         }
     }
 }
+
 @Composable
 private fun Screen(
     ndot: FontFamily,
