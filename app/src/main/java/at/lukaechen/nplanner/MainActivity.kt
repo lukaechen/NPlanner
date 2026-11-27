@@ -10,6 +10,7 @@ import androidx.compose.foundation.gestures.scrollBy
 import androidx.compose.ui.layout.onGloballyPositioned
 import androidx.compose.ui.layout.positionInRoot
 import androidx.compose.ui.semantics.contentDescription
+import androidx.compose.ui.semantics.clearAndSetSemantics
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.graphics.toArgb
 import android.os.Bundle
@@ -127,7 +128,7 @@ private val White get() = NPlannerAppearance.palette.foreground
 private val Muted get() = NPlannerAppearance.palette.muted
 private val Red get() = NPlannerAppearance.palette.accent
 
-private const val NPLANNER_VERSION = "0.62"
+private const val NPLANNER_VERSION = "0.63"
 
 /** FIXED = feste Uhrzeit, INTERVAL = Zeitabstand mit Von/Bis, ALLDAY = ohne Zeit, WEEKLY = Flexibles Wochenziel (1..14x pro Woche). */
 enum class RuleKind { FIXED, INTERVAL, ALLDAY, ONE_TIME, WEEKLY }
@@ -371,8 +372,8 @@ private fun triggerHaptic(
     val lightweight = undo || style == HapticStyle.TICK
     val (rhythm, strengths) = when (style) {
         HapticStyle.TICK -> longArrayOf(0L, 10L) to intArrayOf(0, 60)
-        HapticStyle.UNDO -> longArrayOf(0L, 12L) to intArrayOf(0, 55)
-        HapticStyle.TASK_DONE -> longArrayOf(0L, 38L) to intArrayOf(0, 225)
+        HapticStyle.UNDO -> longArrayOf(0L, 10L) to intArrayOf(0, 36)
+        HapticStyle.TASK_DONE -> longArrayOf(0L, 46L) to intArrayOf(0, 255)
         HapticStyle.CONFIRM -> longArrayOf(0L, 18L, 45L, 31L) to intArrayOf(0, 100, 0, 185)
         HapticStyle.DELETE -> longArrayOf(0L, 38L, 55L, 17L) to intArrayOf(0, 205, 0, 95)
         HapticStyle.DAY_COMPLETE ->
@@ -391,7 +392,7 @@ private fun triggerHaptic(
             @Suppress("DEPRECATION")
             (context.getSystemService(Context.VIBRATOR_SERVICE) as? Vibrator)
         }
-        if (vibrator == null || !vibrator.hasVibrator() || (lightweight && !vibrator.hasAmplitudeControl())) false else {
+        if (vibrator == null || !vibrator.hasVibrator() || (style == HapticStyle.TICK && !vibrator.hasAmplitudeControl())) false else {
             // The lengths and rhythm remain distinct even if amplitudes are flattened by the device.
             val effect = if (vibrator.hasAmplitudeControl()) {
                 VibrationEffect.createWaveform(rhythm, strengths, -1)
@@ -429,7 +430,7 @@ private fun triggerHaptic(
     if (view != null) {
         when (style) {
             HapticStyle.TICK -> view.performHapticFeedback(soft)
-            HapticStyle.UNDO -> view.performHapticFeedback(click)
+            HapticStyle.UNDO -> view.performHapticFeedback(soft)
             HapticStyle.TASK_DONE -> view.performHapticFeedback(firm)
             else -> {
                 val (timing, effects) = when (style) {
@@ -1019,6 +1020,7 @@ class MainActivity : ComponentActivity() {
         var editingRule by remember { mutableStateOf<Rule?>(null) }
         var dotHeadings by remember { mutableStateOf(prefs.getBoolean("use_ndot_headings", false)) }
         var orbit by remember { mutableStateOf(prefs.getString("progress_style", "bars") == "orbit") }
+        var animateTodayCount by remember { mutableStateOf(prefs.getBoolean("animate_today_count", true)) }
         var historyDots by remember { mutableStateOf(prefs.getString("history_style", "dots") == "dots") }
         var testMode by remember { mutableStateOf(prefs.getBoolean("test_mode_multi_weekly", false)) }
 
@@ -1374,6 +1376,7 @@ class MainActivity : ComponentActivity() {
                             onToggle = ::toggle,
                             nowMin = nowMin,
                             orbit = orbit,
+                            animateCount = animateTodayCount,
                             tick = tick
                         )
                         1 -> HistoryScreen(
@@ -1510,6 +1513,12 @@ class MainActivity : ComponentActivity() {
                                 if (changed) triggerHaptic(context, haptic, HapticStyle.TICK, feedbackView)
                             },
                             orbit = orbit,
+                            animateCount = animateTodayCount,
+                            onAnimateCountChange = { enabled ->
+                                animateTodayCount = enabled
+                                prefs.edit().putBoolean("animate_today_count", enabled).apply()
+                                triggerHaptic(context, haptic, HapticStyle.TICK, feedbackView)
+                            },
                             onProgressStyleChange = { useOrbit ->
                                 val changed = orbit != useOrbit
                                 orbit = useOrbit
@@ -1664,7 +1673,9 @@ private fun DisplayTitle(
 }
 
 @Composable
-private fun DisplayCount(done: Int, total: Int, ndot: FontFamily, fontSize: TextUnit) {
+private fun DisplayCount(
+    done: Int, total: Int, ndot: FontFamily, fontSize: TextUnit, animate: Boolean = false
+) {
     val useDot = LocalDotHeadings.current
     val family = if (useDot) ndot else LocalClassicHeadings.current
     val weight = if (useDot) FontWeight.Normal else FontWeight.Light
@@ -1690,7 +1701,7 @@ private fun DisplayCount(done: Int, total: Int, ndot: FontFamily, fontSize: Text
     Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.Center) {
         Box(Modifier.width(numberWidth).clipToBounds().padding(vertical = verticalInset),
             contentAlignment = Alignment.CenterEnd) {
-            Text(done.toString(), color = White, style = digitStyle, maxLines = 1, softWrap = false)
+            CountWheelNumber(done, White, digitStyle, animate, Alignment.CenterEnd)
         }
         Box(Modifier.width(slashWidth).clipToBounds().padding(vertical = verticalInset),
             contentAlignment = Alignment.Center) {
@@ -1698,8 +1709,50 @@ private fun DisplayCount(done: Int, total: Int, ndot: FontFamily, fontSize: Text
         }
         Box(Modifier.width(numberWidth).clipToBounds().padding(vertical = verticalInset),
             contentAlignment = Alignment.CenterStart) {
-            Text(total.toString(), color = npNeutral(0xFF5A5A5A), style = digitStyle, maxLines = 1, softWrap = false)
+            CountWheelNumber(total, npNeutral(0xFF5A5A5A), digitStyle, animate, Alignment.CenterStart)
         }
+    }
+}
+
+@Composable
+private fun CountWheelNumber(
+    number: Int, color: Color, style: TextStyle, animate: Boolean, alignment: Alignment
+) {
+    if (!animate) {
+        Text(number.toString(), color = color, style = style, maxLines = 1, softWrap = false)
+        return
+    }
+    var current by remember { mutableIntStateOf(number) }
+    var outgoing by remember { mutableIntStateOf(number) }
+    val position = remember { Animatable(1f) }
+    LaunchedEffect(number) {
+        if (number != current) {
+            outgoing = current
+            current = number
+            position.snapTo(0f)
+            position.animateTo(1f, tween(240, easing = FastOutSlowInEasing))
+        }
+    }
+    val direction = if (current >= outgoing) 1f else -1f
+    Box(Modifier.clearAndSetSemantics { contentDescription = number.toString() }, contentAlignment = alignment) {
+        if (current != outgoing && position.value < 1f) {
+            Text(outgoing.toString(), color = color, style = style, maxLines = 1, softWrap = false,
+                modifier = Modifier.graphicsLayer {
+                    val fraction = position.value
+                    translationY = -direction * size.height * .57f * fraction
+                    rotationX = direction * 24f * fraction
+                    cameraDistance = 32.dp.toPx()
+                    alpha = 1f - fraction
+                })
+        }
+        Text(current.toString(), color = color, style = style, maxLines = 1, softWrap = false,
+            modifier = Modifier.graphicsLayer {
+                val remaining = 1f - position.value
+                translationY = direction * size.height * .57f * remaining
+                rotationX = -direction * 24f * remaining
+                cameraDistance = 32.dp.toPx()
+                alpha = position.value
+            })
     }
 }
 
@@ -1781,6 +1834,7 @@ private fun TodayScreen(
     onToggle: (Rule) -> Unit,
     nowMin: Int,
     orbit: Boolean,
+    animateCount: Boolean,
     tick: Int
 ) {
     val mandatoryDaily = remember(rules) { rules.filterNot { it.optional } }
@@ -1823,7 +1877,8 @@ private fun TodayScreen(
         title = npString(R.string.np_2ae2ac311151),
         subtitle = date.format(DateTimeFormatter.ofPattern("EEEE, d. MMMM", npLocale())),
         scrollable = false,
-        compactHeader = orbit
+        compactHeader = orbit,
+        headerGap = if (orbit) 4.dp else 6.dp
     ) {
         if (orbit) {
             ProgressOrbit(
@@ -1835,7 +1890,8 @@ private fun TodayScreen(
                 boxHeight = 156.dp,
                 strokeWidth = 6.dp,
                 countFontSize = 38.sp,
-                segmented = true
+                segmented = true,
+                animateCount = animateCount
             )
             Text(
                 status,
@@ -1844,8 +1900,7 @@ private fun TodayScreen(
                 modifier = Modifier.align(Alignment.CenterHorizontally).padding(top = 2.dp)
             )
         } else {
-            Spacer(Modifier.height(12.dp))
-            ProgressBars(doneToday, totalToday, ndot)
+            ProgressBars(doneToday, totalToday, ndot, animateCount)
             Text(status, color = Muted, fontSize = 12.sp, modifier = Modifier.padding(top = 12.dp))
         }
         Spacer(Modifier.height(if (orbit) 4.dp else 8.dp))
@@ -1948,14 +2003,14 @@ private fun TodayScreen(
 }
 
 @Composable
-private fun ProgressBars(done: Int, total: Int, ndot: FontFamily) {
+private fun ProgressBars(done: Int, total: Int, ndot: FontFamily, animateCount: Boolean) {
     val animatedDone by animateFloatAsState(done.toFloat(), spring(dampingRatio = Spring.DampingRatioNoBouncy, stiffness = Spring.StiffnessLow), label = "bar_progress")
     val completed = total > 0 && done >= total
     val celebration = remember { Animatable(1f) }
     LaunchedEffect(completed) { if (completed) { celebration.snapTo(0f); celebration.animateTo(1f, tween(2750, easing = androidx.compose.animation.core.LinearEasing)) } }
     Column(Modifier.fillMaxWidth()) {
         Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.Bottom, horizontalArrangement = Arrangement.SpaceBetween) {
-            DisplayCount(done, total, ndot, 84.sp)
+            DisplayCount(done, total, ndot, 84.sp, animate = animateCount)
             Text(if (completed) npString(R.string.np_595b69683dcf) else npString(R.string.np_71f43d0f0475), color = Muted, fontFamily = FontFamily.Default, fontSize = 10.sp, letterSpacing = 2.sp, modifier = Modifier.padding(bottom = 6.dp))
         }
         Spacer(Modifier.height(16.dp))
@@ -1984,7 +2039,8 @@ private fun ProgressOrbit(
     boxHeight: Dp = 156.dp,
     strokeWidth: Dp = 6.dp,
     countFontSize: TextUnit = 38.sp,
-    segmented: Boolean = true
+    segmented: Boolean = true,
+    animateCount: Boolean = false
 ) {
     val complete = total > 0 && done >= total
     val celebration = remember { Animatable(1f) }
@@ -1993,6 +2049,7 @@ private fun ProgressOrbit(
         val justCompleted = complete && !previouslyComplete
         previouslyComplete = complete
         if (justCompleted) {
+            if (animateCount) kotlinx.coroutines.delay(240L)
             celebration.snapTo(0f)
             celebration.animateTo(1f, tween(1850, easing = androidx.compose.animation.core.LinearEasing))
         } else {
@@ -2075,7 +2132,7 @@ private fun ProgressOrbit(
             }
         } else {
             Column(horizontalAlignment = Alignment.CenterHorizontally) {
-                DisplayCount(done, total, ndot, countFontSize)
+                DisplayCount(done, total, ndot, countFontSize, animate = animateCount)
                 Text(if (complete) npString(R.string.np_595b69683dcf) else npString(R.string.np_71f43d0f0475),
                     color = Muted, fontFamily = FontFamily.Default, fontSize = 9.sp, letterSpacing = 2.sp)
             }
@@ -6594,6 +6651,8 @@ private fun SetupScreen(
     useDotHeadings: Boolean,
     onHeadingStyleChange: (Boolean) -> Unit,
     orbit: Boolean,
+    animateCount: Boolean,
+    onAnimateCountChange: (Boolean) -> Unit,
     onProgressStyleChange: (Boolean) -> Unit,
     historyDots: Boolean,
     onHistoryStyleChange: (Boolean) -> Unit,
@@ -6793,6 +6852,15 @@ private fun SetupScreen(
                     Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                         ProgressStyleTile(npString(R.string.np_e51bd6be1fe7), !orbit, Modifier.weight(1f), { onProgressStyleChange(false) }) { fg, track -> MiniBars(fg, track) }
                         ProgressStyleTile(npString(R.string.np_78ba515b2614), orbit, Modifier.weight(1f), { onProgressStyleChange(true) }) { fg, track -> MiniRing(fg, track) }
+                    }
+                    Spacer(Modifier.height(8.dp))
+                    Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
+                        val german = npLocale().language == "de"
+                        val animationLabel = if (german) "Zähleranimation" else "Counter animation"
+                        Text(animationLabel, color = White, fontSize = 13.sp,
+                            modifier = Modifier.weight(1f).padding(end = 8.dp))
+                        Switch(checked = animateCount, onCheckedChange = onAnimateCountChange,
+                            modifier = Modifier.semantics { contentDescription = animationLabel })
                     }
                 }
             }
