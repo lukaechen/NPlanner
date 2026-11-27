@@ -126,7 +126,7 @@ private val White get() = NPlannerAppearance.palette.foreground
 private val Muted get() = NPlannerAppearance.palette.muted
 private val Red get() = NPlannerAppearance.palette.accent
 
-private const val NPLANNER_VERSION = "0.56"
+private const val NPLANNER_VERSION = "0.57"
 
 /** FIXED = feste Uhrzeit, INTERVAL = Zeitabstand mit Von/Bis, ALLDAY = ohne Zeit, WEEKLY = Flexibles Wochenziel (1..14x pro Woche). */
 enum class RuleKind { FIXED, INTERVAL, ALLDAY, ONE_TIME, WEEKLY }
@@ -360,15 +360,10 @@ private fun triggerHaptic(
     style: HapticStyle,
     view: android.view.View? = null
 ) {
-    if (style != HapticStyle.DAY_COMPLETE) {
-        val feedback = when (style) {
-            HapticStyle.TASK_DONE -> HapticFeedbackType.LongPress
-            else -> HapticFeedbackType.TextHandleMove
-        }
-        if (style == HapticStyle.UNDO && view != null && Build.VERSION.SDK_INT >= Build.VERSION_CODES.LOLLIPOP) {
-            if (view.performHapticFeedback(android.view.HapticFeedbackConstants.CLOCK_TICK)) return
-        }
-        haptic.performHapticFeedback(feedback)
+    if (style != HapticStyle.DAY_COMPLETE && style != HapticStyle.UNDO) {
+        haptic.performHapticFeedback(
+            if (style == HapticStyle.TASK_DONE) HapticFeedbackType.LongPress else HapticFeedbackType.TextHandleMove
+        )
         return
     }
 
@@ -378,8 +373,14 @@ private fun triggerHaptic(
         ) == 0
     ) return
 
-    val rhythm = longArrayOf(0L, 24L, 68L, 24L, 122L, 40L, 70L, 28L, 132L, 65L)
-    val strengths = intArrayOf(0, 120, 0, 145, 0, 200, 0, 145, 0, 240)
+    val undo = style == HapticStyle.UNDO
+    // Intro: two light taps. Build: three rising beats. Finale: an accent with a soft tail.
+    val rhythm = if (undo) longArrayOf(0L, 12L) else longArrayOf(
+        0L, 18L, 68L, 20L, 155L, 28L, 58L, 34L, 73L, 42L, 175L, 22L, 43L, 48L, 28L, 32L, 30L
+    )
+    val strengths = if (undo) intArrayOf(0, 62) else intArrayOf(
+        0, 92, 0, 120, 0, 145, 0, 176, 0, 207, 0, 135, 0, 248, 125, 82, 45
+    )
     val played = if (context.checkSelfPermission(android.Manifest.permission.VIBRATE) ==
         android.content.pm.PackageManager.PERMISSION_GRANTED
     ) runCatching {
@@ -389,7 +390,7 @@ private fun triggerHaptic(
             @Suppress("DEPRECATION")
             (context.getSystemService(Context.VIBRATOR_SERVICE) as? Vibrator)
         }
-        if (vibrator == null || !vibrator.hasVibrator()) false else {
+        if (vibrator == null || !vibrator.hasVibrator() || (undo && !vibrator.hasAmplitudeControl())) false else {
             val effect = if (vibrator.hasAmplitudeControl()) {
                 VibrationEffect.createWaveform(rhythm, strengths, -1)
             } else {
@@ -405,18 +406,27 @@ private fun triggerHaptic(
         }
     }.getOrDefault(false) else false
 
-    if (!played && view != null) {
-        // Keep the five-beat rhythm even without the manifest permission.
-        val clock = android.view.HapticFeedbackConstants.CLOCK_TICK
+    if (played) return
+    if (undo) {
+        if (view != null && Build.VERSION.SDK_INT >= Build.VERSION_CODES.UPSIDE_DOWN_CAKE &&
+            view.performHapticFeedback(android.view.HapticFeedbackConstants.SEGMENT_FREQUENT_TICK)
+        ) return
+        haptic.performHapticFeedback(HapticFeedbackType.TextHandleMove)
+        return
+    }
+    if (view != null) {
+        val soft = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.UPSIDE_DOWN_CAKE)
+            android.view.HapticFeedbackConstants.SEGMENT_FREQUENT_TICK
+        else android.view.HapticFeedbackConstants.CLOCK_TICK
+        val mid = android.view.HapticFeedbackConstants.CLOCK_TICK
         val hit = android.view.HapticFeedbackConstants.LONG_PRESS
-        longArrayOf(0L, 92L, 238L, 348L, 508L).forEachIndexed { index, at ->
+        val beats = intArrayOf(soft, soft, mid, mid, hit, soft, hit)
+        longArrayOf(0L, 86L, 261L, 347L, 454L, 671L, 736L).forEachIndexed { index, at ->
             view.postDelayed({
-                if (view.isAttachedToWindow && view.hasWindowFocus()) {
-                    view.performHapticFeedback(if (index == 2 || index == 4) hit else clock)
-                }
+                if (view.isAttachedToWindow && view.hasWindowFocus()) view.performHapticFeedback(beats[index])
             }, at)
         }
-    } else if (!played) {
+    } else {
         haptic.performHapticFeedback(HapticFeedbackType.LongPress)
     }
 }
@@ -1151,7 +1161,12 @@ class MainActivity : ComponentActivity() {
             triggerHaptic(context, haptic, style, feedbackView)
         }
 
+        fun currentTodayProgress() = calculateTodayProgress(
+            dailyRules, weeklyRules, { doneCount(it) }, { doneTodayForWeekly(it) }
+        )
+
         fun stepWeeklyRule(rule: Rule, delta: Int) {
+            val wasDayComplete = currentTodayProgress().complete
             val target = totalOf(rule)
             val current = doneCount(rule)
             val checkedToday = doneTodayForWeekly(rule)
@@ -1170,7 +1185,11 @@ class MainActivity : ComponentActivity() {
                 e.apply()
                 persistTodaySnapshot(date)
                 tick++
-                fireFeedback(becameDone = delta > 0, becameUndone = delta < 0)
+                fireFeedback(
+                    becameDone = delta > 0,
+                    becameUndone = delta < 0,
+                    dayFinished = delta > 0 && !wasDayComplete && currentTodayProgress().complete
+                )
             } else {
                 if (delta > 0 && !checkedToday && current < target) {
                     val next = (current + 1).coerceIn(0, target)
@@ -1180,7 +1199,11 @@ class MainActivity : ComponentActivity() {
                     e.apply()
                     persistTodaySnapshot(date)
                     tick++
-                    fireFeedback(becameDone = true, becameUndone = false)
+                    fireFeedback(
+                        becameDone = true,
+                        becameUndone = false,
+                        dayFinished = !wasDayComplete && currentTodayProgress().complete
+                    )
                 } else if (delta < 0 && checkedToday && current > 0) {
                     val next = (current - 1).coerceIn(0, target)
                     e.putInt(weekCountKey(rule), next)
@@ -1220,13 +1243,11 @@ class MainActivity : ComponentActivity() {
                     becameUndone = wasDone
                 }
             }
-            val wasDayComplete = daySnapshot(date).let { it.total > 0 && it.done >= it.total }
+            val wasDayComplete = currentTodayProgress().complete
             e.apply()
             persistTodaySnapshot(date)
             tick++
-            val dayFinished = becameDone && !wasDayComplete && daySnapshot(date).let {
-                it.total > 0 && it.done >= it.total
-            }
+            val dayFinished = becameDone && !wasDayComplete && currentTodayProgress().complete
             fireFeedback(becameDone, becameUndone, dayFinished)
         }
 
@@ -1354,7 +1375,7 @@ class MainActivity : ComponentActivity() {
                                     }
                                     saveWorkouts(workouts)
                                 }
-                                triggerHaptic(context, haptic, HapticStyle.DAY_COMPLETE, feedbackView)
+                                triggerHaptic(context, haptic, HapticStyle.TASK_DONE)
                             },
                             onDeleteExercise = { exId ->
                                 exercises.find { it.id == exId }?.mediaPath?.takeIf { it.isNotBlank() }?.let { path ->
@@ -1614,7 +1635,7 @@ private fun Screen(
         .fillMaxSize()
         .statusBarsPadding()
         .padding(horizontal = 22.dp)
-        .padding(top = if (compactHeader) 8.dp else 12.dp, bottom = 28.dp)
+        .padding(top = if (compactHeader) 8.dp else 12.dp)
     Column(if (scrollable) base.imePadding().verticalScroll(LocalPageScroll.current ?: rememberScrollState()) else base) {
         Row(verticalAlignment = Alignment.CenterVertically) {
             Box(Modifier.size(6.dp).background(Red, CircleShape))
@@ -1630,7 +1651,35 @@ private fun Screen(
         Text(subtitle, color = Muted, fontSize = if (compactHeader) 12.sp else 13.sp)
         Spacer(Modifier.height(if (compactHeader) 8.dp else 14.dp))
         content()
+        if (scrollable) FloatingNavScrollClearance()
     }
+}
+
+@Composable
+private fun FloatingNavScrollClearance() {
+    // Scrollable space, never a fixed strip over the page.
+    val systemBottom = with(LocalDensity.current) { WindowInsets.navigationBars.getBottom(this).toDp() }
+    Spacer(Modifier.height(maxOf(24.dp, systemBottom + 8.dp) + 62.dp + 12.dp))
+}
+
+private data class TodayProgress(val done: Int, val total: Int) {
+    val complete: Boolean get() = total > 0 && done == total
+}
+
+// Only the mandatory entries shown in Today's progress count towards its celebration.
+// A weekly goal requires today's checkmark, not completion of the whole week.
+private fun calculateTodayProgress(
+    daily: List<Rule>,
+    weekly: List<Rule>,
+    count: (Rule) -> Int,
+    checkedToday: (Rule) -> Boolean
+): TodayProgress {
+    val mandatoryDaily = daily.filterNot { it.optional }
+    val mandatoryWeekly = weekly.filter { !it.optional && (checkedToday(it) || count(it) < totalOf(it)) }
+    return TodayProgress(
+        done = mandatoryDaily.count { count(it) >= totalOf(it) } + mandatoryWeekly.count(checkedToday),
+        total = mandatoryDaily.size + mandatoryWeekly.size
+    )
 }
 
 @Composable
@@ -1651,16 +1700,11 @@ private fun TodayScreen(
     val mandatoryDaily = remember(rules) { rules.filterNot { it.optional } }
     val optionalDaily = remember(rules) { rules.filter { it.optional } }
 
-    val activeMandatoryWeeklyForToday = remember(weekly, date, tick) {
-        weekly.filter { !it.optional && (doneTodayWeekly(it) || count(it) < totalOf(it)) }
+    val todayProgress = remember(rules, weekly, date, tick) {
+        calculateTodayProgress(rules, weekly, count, doneTodayWeekly)
     }
-    val dailyDone = remember(mandatoryDaily, date, tick) { mandatoryDaily.count { count(it) >= totalOf(it) } }
-    val weeklyDoneToday = remember(activeMandatoryWeeklyForToday, date, tick) {
-        activeMandatoryWeeklyForToday.count { doneTodayWeekly(it) }
-    }
-
-    val totalToday = mandatoryDaily.size + activeMandatoryWeeklyForToday.size
-    val doneToday = dailyDone + weeklyDoneToday
+    val totalToday = todayProgress.total
+    val doneToday = todayProgress.done
     val progress by animateFloatAsState(
         targetValue = if (totalToday == 0) 1f else doneToday.toFloat() / totalToday,
         animationSpec = spring(dampingRatio = Spring.DampingRatioNoBouncy, stiffness = Spring.StiffnessLow),
@@ -1810,7 +1854,7 @@ private fun TodayScreen(
                     compact = orbit
                 )
             }
-            Spacer(Modifier.height(6.dp))
+            FloatingNavScrollClearance()
         }
     }
 }
@@ -1820,7 +1864,7 @@ private fun ProgressBars(done: Int, total: Int, ndot: FontFamily) {
     val animatedDone by animateFloatAsState(done.toFloat(), spring(dampingRatio = Spring.DampingRatioNoBouncy, stiffness = Spring.StiffnessLow), label = "bar_progress")
     val completed = total > 0 && done >= total
     val celebration = remember { Animatable(1f) }
-    LaunchedEffect(completed) { if (completed) { celebration.snapTo(0f); celebration.animateTo(1f, tween(1850, easing = FastOutSlowInEasing)) } }
+    LaunchedEffect(completed) { if (completed) { celebration.snapTo(0f); celebration.animateTo(1f, tween(2750, easing = androidx.compose.animation.core.LinearEasing)) } }
     Column(Modifier.fillMaxWidth()) {
         Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.Bottom, horizontalArrangement = Arrangement.SpaceBetween) {
             DisplayCount(done, total, ndot, 84.sp)
@@ -6474,6 +6518,15 @@ private fun SetupScreen(
             }
         }
 
+        if (rules.size > 1) {
+            Text(
+                npString(R.string.np_3839958189dd),
+                color = Muted,
+                fontSize = 11.sp,
+                modifier = Modifier.padding(start = 6.dp, end = 6.dp, bottom = 10.dp)
+            )
+        }
+
         if (rules.isEmpty()) {
             Surface(color = Panel, shape = RoundedCornerShape(22.dp), modifier = Modifier.fillMaxWidth().padding(vertical = 5.dp)) {
                 Text(
@@ -6668,12 +6721,6 @@ private fun SetupScreen(
             }
         }
 
-        Text(
-            npString(R.string.np_3839958189dd),
-            color = Muted,
-            fontSize = 11.sp,
-            modifier = Modifier.padding(horizontal = 6.dp, vertical = 18.dp)
-        )
         HorizontalDivider(color = npNeutral(0xFF242424), modifier = Modifier.padding(top = 6.dp))
         Text(
             "${npString(R.string.np_69a89741235d)} $NPLANNER_VERSION",
