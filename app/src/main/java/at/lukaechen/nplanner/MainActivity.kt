@@ -114,6 +114,8 @@ private val White get() = NPlannerAppearance.palette.foreground
 private val Muted get() = NPlannerAppearance.palette.muted
 private val Red get() = NPlannerAppearance.palette.accent
 
+private const val NPLANNER_VERSION = "0.50"
+
 /** FIXED = feste Uhrzeit, INTERVAL = Zeitabstand mit Von/Bis, ALLDAY = ohne Zeit, WEEKLY = Flexibles Wochenziel (1..14x pro Woche). */
 enum class RuleKind { FIXED, INTERVAL, ALLDAY, ONE_TIME, WEEKLY }
 
@@ -6533,7 +6535,7 @@ private fun SetupScreen(
         )
         HorizontalDivider(color = npNeutral(0xFF242424), modifier = Modifier.padding(top = 6.dp))
         Text(
-            npString(R.string.np_69a89741235d),
+            "${npString(R.string.np_69a89741235d)} $NPLANNER_VERSION",
             color = npNeutral(0xFFB6B6B6),
             fontFamily = FontFamily.Default,
             fontSize = 10.sp,
