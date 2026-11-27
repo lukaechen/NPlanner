@@ -30,6 +30,10 @@ import androidx.compose.animation.slideInHorizontally
 import androidx.compose.animation.slideOutHorizontally
 import androidx.compose.animation.togetherWith
 import androidx.compose.animation.core.FastOutSlowInEasing
+import androidx.compose.animation.core.LinearEasing
+import androidx.compose.animation.core.animateFloat
+import androidx.compose.animation.core.infiniteRepeatable
+import androidx.compose.animation.core.rememberInfiniteTransition
 import androidx.compose.animation.core.Spring
 import androidx.compose.animation.core.Animatable
 import androidx.compose.animation.core.animateFloatAsState
@@ -128,7 +132,22 @@ private val White get() = NPlannerAppearance.palette.foreground
 private val Muted get() = NPlannerAppearance.palette.muted
 private val Red get() = NPlannerAppearance.palette.accent
 
-private const val NPLANNER_VERSION = "0.63"
+private const val NPLANNER_VERSION = "0.64"
+private const val WINTER_SNOW_KEY = "winter_snow_mode"
+
+private enum class WinterSnowMode {
+    AUTO, ON, OFF;
+
+    fun showsSnow(date: LocalDate): Boolean = when (this) {
+        AUTO -> date.monthValue == 12 || date.monthValue in 1..2
+        ON -> true
+        OFF -> false
+    }
+
+    companion object {
+        fun fromStored(value: String?): WinterSnowMode = values().firstOrNull { it.name == value } ?: AUTO
+    }
+}
 
 /** FIXED = feste Uhrzeit, INTERVAL = Zeitabstand mit Von/Bis, ALLDAY = ohne Zeit, WEEKLY = Flexibles Wochenziel (1..14x pro Woche). */
 enum class RuleKind { FIXED, INTERVAL, ALLDAY, ONE_TIME, WEEKLY }
@@ -1023,6 +1042,9 @@ class MainActivity : ComponentActivity() {
         var animateTodayCount by remember { mutableStateOf(prefs.getBoolean("animate_today_count", true)) }
         var historyDots by remember { mutableStateOf(prefs.getString("history_style", "dots") == "dots") }
         var testMode by remember { mutableStateOf(prefs.getBoolean("test_mode_multi_weekly", false)) }
+        var winterSnowMode by remember {
+            mutableStateOf(WinterSnowMode.fromStored(prefs.getString(WINTER_SNOW_KEY, null)))
+        }
 
         LaunchedEffect(Unit) { while (true) { date = LocalDate.now(); nowMin = minuteOfDay(); delay(30_000) } }
 
@@ -1532,6 +1554,13 @@ class MainActivity : ComponentActivity() {
                                 prefs.edit().putString("history_style", if (useDots) "dots" else "calendar").apply()
                                 if (changed) triggerHaptic(context, haptic, HapticStyle.TICK, feedbackView)
                             },
+                            winterSnowMode = winterSnowMode,
+                            onWinterSnowModeChange = { mode ->
+                                if (winterSnowMode != mode) {
+                                    winterSnowMode = mode
+                                    prefs.edit().putString(WINTER_SNOW_KEY, mode.name).apply()
+                                }
+                            },
                             testMode = testMode,
                             onTestModeChange = { enabled ->
                                 val changed = testMode != enabled
@@ -1585,6 +1614,12 @@ class MainActivity : ComponentActivity() {
                     )
                 ) { slot ->
                     PageContent(pageOrder[slot])
+                }
+                if (winterSnowMode.showsSnow(date)) {
+                    WinterSnowOverlay(
+                        glyphStyle = dotHeadings,
+                        modifier = Modifier.align(Alignment.TopCenter)
+                    )
                 }
                 GlyphNav(
                     pagerState = pagerState,
@@ -6645,6 +6680,83 @@ private fun ProgressStyleTile(
 }
 
 @Composable
+private fun WinterSnowSettings(mode: WinterSnowMode, onModeChange: (WinterSnowMode) -> Unit) {
+    val german = npLocale().language == "de"
+    Surface(color = Panel, shape = RoundedCornerShape(22.dp), modifier = Modifier.fillMaxWidth()) {
+        Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+            Text(if (german) "Winterschnee" else "Winter snow", color = White,
+                fontSize = 15.sp, fontWeight = FontWeight.Medium)
+            Text(
+                if (german) "Auto: 1. Dezember bis Ende Februar. An: ganzjährig."
+                else "Auto: December 1 through the end of February. On: all year.",
+                color = Muted, fontSize = 11.sp, lineHeight = 16.sp
+            )
+            Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                val choices = listOf(
+                    WinterSnowMode.AUTO to "Auto",
+                    WinterSnowMode.ON to if (german) "An" else "On",
+                    WinterSnowMode.OFF to if (german) "Aus" else "Off"
+                )
+                choices.forEach { (choice, label) ->
+                    ChoiceChip(label, mode == choice, Modifier.weight(1f)) { onModeChange(choice) }
+                }
+            }
+        }
+    }
+}
+
+@Composable
+private fun WinterSnowOverlay(glyphStyle: Boolean, modifier: Modifier = Modifier) {
+    val transition = rememberInfiniteTransition(label = "winter_snow")
+    // Each particle completes an integer number of passes per loop, so the loop joins cleanly.
+    val time = transition.animateFloat(
+        initialValue = 0f, targetValue = 120f,
+        animationSpec = infiniteRepeatable(animation = tween(120_000, easing = LinearEasing)),
+        label = "snow_drift"
+    )
+    val ink = White
+    val darkBackground = Bg.luminance() < .5f
+    val bandHeight = with(LocalDensity.current) { WindowInsets.statusBars.getTop(this).toDp() } + 98.dp
+    Canvas(modifier.fillMaxWidth().height(bandHeight).clipToBounds()) {
+        val elapsed = time.value
+        val margin = 12.dp.toPx()
+        val usableWidth = (size.width - margin * 2f).coerceAtLeast(0f)
+        for (index in 0 until 9) {
+            val duration = when (index % 4) { 0 -> 12f; 1 -> 15f; 2 -> 20f; else -> 24f }
+            val fall = (elapsed / duration + (index * .381966f) % 1f) % 1f
+            val fade = minOf(fall / .15f, (1f - fall) / .30f, 1f)
+            val tint = ink.copy(alpha = fade * (if (darkBackground) .28f else .20f))
+            val radius = (2.7f + (index % 4) * .55f).dp.toPx()
+            val wave = elapsed / 120f * (2f * Math.PI.toFloat())
+            val x = margin + usableWidth * ((index * .618034f + .13f) % 1f) +
+                sin(wave * (13 + index % 4) + index) * 7.dp.toPx()
+            val y = fall * (size.height + radius * 2f) - radius
+            val middle = Offset(x, y)
+            val turn = if (glyphStyle) index * .23f else wave * (2 + index % 3) + index * .31f
+            val strokeWidth = .65.dp.toPx()
+            val dotRadius = (radius * .13f).coerceAtLeast(.48.dp.toPx())
+            if (glyphStyle) drawCircle(tint, dotRadius, middle)
+            for (arm in 0 until 6) {
+                val angle = turn + arm * (Math.PI.toFloat() / 3f)
+                val ray = Offset(cos(angle), sin(angle))
+                if (glyphStyle) {
+                    drawCircle(tint, dotRadius, middle + ray * (radius * .51f))
+                    drawCircle(tint, dotRadius, middle + ray * radius)
+                } else {
+                    drawLine(tint, middle, middle + ray * radius, strokeWidth, StrokeCap.Round)
+                    val branch = middle + ray * (radius * .66f)
+                    for (side in -1..1 step 2) {
+                        val fork = angle + side * .74f
+                        val end = branch + Offset(cos(fork), sin(fork)) * (radius * .37f)
+                        drawLine(tint, branch, end, strokeWidth, StrokeCap.Round)
+                    }
+                }
+            }
+        }
+    }
+}
+
+@Composable
 private fun SetupScreen(
     ndot: FontFamily,
     rules: List<Rule>,
@@ -6656,6 +6768,8 @@ private fun SetupScreen(
     onProgressStyleChange: (Boolean) -> Unit,
     historyDots: Boolean,
     onHistoryStyleChange: (Boolean) -> Unit,
+    winterSnowMode: WinterSnowMode,
+    onWinterSnowModeChange: (WinterSnowMode) -> Unit,
     testMode: Boolean,
     onTestModeChange: (Boolean) -> Unit,
     onMove: (Int, Int) -> Unit,
@@ -6882,6 +6996,8 @@ private fun SetupScreen(
             topPadding = 24.dp, bottomPadding = 10.dp)
         NPlannerDriveBackupSettings()
         SectionLabel(npString(R.string.np_9028b65aa0a5), topPadding = 24.dp, bottomPadding = 10.dp)
+        WinterSnowSettings(winterSnowMode, onWinterSnowModeChange)
+        Spacer(Modifier.height(10.dp))
         Surface(
             color = Panel,
             shape = RoundedCornerShape(22.dp),
