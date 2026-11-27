@@ -59,7 +59,6 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.draw.blur
 import androidx.compose.ui.draw.drawWithContent
-import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.drawscope.translate
 import androidx.compose.ui.graphics.layer.GraphicsLayer
 import androidx.compose.ui.graphics.layer.drawLayer
@@ -87,6 +86,7 @@ import androidx.compose.ui.platform.LocalHapticFeedback
 import androidx.compose.ui.text.PlatformTextStyle
 import androidx.compose.ui.text.SpanStyle
 import androidx.compose.ui.text.TextStyle
+import androidx.compose.ui.text.rememberTextMeasurer
 import androidx.compose.ui.text.buildAnnotatedString
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
@@ -126,7 +126,7 @@ private val White get() = NPlannerAppearance.palette.foreground
 private val Muted get() = NPlannerAppearance.palette.muted
 private val Red get() = NPlannerAppearance.palette.accent
 
-private const val NPLANNER_VERSION = "0.57"
+private const val NPLANNER_VERSION = "0.58"
 
 /** FIXED = feste Uhrzeit, INTERVAL = Zeitabstand mit Von/Bis, ALLDAY = ohne Zeit, WEEKLY = Flexibles Wochenziel (1..14x pro Woche). */
 enum class RuleKind { FIXED, INTERVAL, ALLDAY, ONE_TIME, WEEKLY }
@@ -360,7 +360,7 @@ private fun triggerHaptic(
     style: HapticStyle,
     view: android.view.View? = null
 ) {
-    if (style != HapticStyle.DAY_COMPLETE && style != HapticStyle.UNDO) {
+    if (style != HapticStyle.DAY_COMPLETE && style != HapticStyle.UNDO && style != HapticStyle.TASK_DONE) {
         haptic.performHapticFeedback(
             if (style == HapticStyle.TASK_DONE) HapticFeedbackType.LongPress else HapticFeedbackType.TextHandleMove
         )
@@ -374,13 +374,17 @@ private fun triggerHaptic(
     ) return
 
     val undo = style == HapticStyle.UNDO
-    // Intro: two light taps. Build: three rising beats. Finale: an accent with a soft tail.
-    val rhythm = if (undo) longArrayOf(0L, 12L) else longArrayOf(
-        0L, 18L, 68L, 20L, 155L, 28L, 58L, 34L, 73L, 42L, 175L, 22L, 43L, 48L, 28L, 32L, 30L
-    )
-    val strengths = if (undo) intArrayOf(0, 62) else intArrayOf(
-        0, 92, 0, 120, 0, 145, 0, 176, 0, 207, 0, 135, 0, 248, 125, 82, 45
-    )
+    val single = style == HapticStyle.TASK_DONE
+    val rhythm = when {
+        undo -> longArrayOf(0L, 14L)
+        single -> longArrayOf(0L, 30L)
+        else -> longArrayOf(0L, 19L, 54L, 24L, 145L, 36L, 48L, 44L, 57L, 52L, 155L, 21L, 65L, 68L)
+    }
+    val strengths = when {
+        undo -> intArrayOf(0, 55)
+        single -> intArrayOf(0, 155)
+        else -> intArrayOf(0, 82, 0, 112, 0, 135, 0, 174, 0, 215, 0, 125, 0, 245)
+    }
     val played = if (context.checkSelfPermission(android.Manifest.permission.VIBRATE) ==
         android.content.pm.PackageManager.PERMISSION_GRANTED
     ) runCatching {
@@ -391,7 +395,24 @@ private fun triggerHaptic(
             (context.getSystemService(Context.VIBRATOR_SERVICE) as? Vibrator)
         }
         if (vibrator == null || !vibrator.hasVibrator() || (undo && !vibrator.hasAmplitudeControl())) false else {
-            val effect = if (vibrator.hasAmplitudeControl()) {
+            val effect = if (!undo && !single && Build.VERSION.SDK_INT >= Build.VERSION_CODES.S &&
+                vibrator.areAllPrimitivesSupported(
+                    VibrationEffect.Composition.PRIMITIVE_TICK,
+                    VibrationEffect.Composition.PRIMITIVE_CLICK,
+                    VibrationEffect.Composition.PRIMITIVE_QUICK_RISE,
+                    VibrationEffect.Composition.PRIMITIVE_THUD
+                )
+            ) {
+                VibrationEffect.startComposition()
+                    .addPrimitive(VibrationEffect.Composition.PRIMITIVE_TICK, .40f)
+                    .addPrimitive(VibrationEffect.Composition.PRIMITIVE_TICK, .65f, 60)
+                    .addPrimitive(VibrationEffect.Composition.PRIMITIVE_CLICK, .60f, 135)
+                    .addPrimitive(VibrationEffect.Composition.PRIMITIVE_CLICK, .85f, 65)
+                    .addPrimitive(VibrationEffect.Composition.PRIMITIVE_QUICK_RISE, .90f, 80)
+                    .addPrimitive(VibrationEffect.Composition.PRIMITIVE_TICK, .60f, 150)
+                    .addPrimitive(VibrationEffect.Composition.PRIMITIVE_THUD, 1f, 75)
+                    .compose()
+            } else if (vibrator.hasAmplitudeControl()) {
                 VibrationEffect.createWaveform(rhythm, strengths, -1)
             } else {
                 VibrationEffect.createWaveform(rhythm, -1)
@@ -401,12 +422,20 @@ private fun triggerHaptic(
                 .setUsage(android.media.AudioAttributes.USAGE_ASSISTANCE_SONIFICATION)
                 .build()
             @Suppress("DEPRECATION")
-            vibrator.vibrate(effect, touch)
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
+                vibrator.vibrate(effect, android.os.VibrationAttributes.createForUsage(android.os.VibrationAttributes.USAGE_TOUCH))
+            } else {
+                vibrator.vibrate(effect, touch)
+            }
             true
         }
     }.getOrDefault(false) else false
 
     if (played) return
+    if (single) {
+        haptic.performHapticFeedback(HapticFeedbackType.LongPress)
+        return
+    }
     if (undo) {
         if (view != null && Build.VERSION.SDK_INT >= Build.VERSION_CODES.UPSIDE_DOWN_CAKE &&
             view.performHapticFeedback(android.view.HapticFeedbackConstants.SEGMENT_FREQUENT_TICK)
@@ -1161,11 +1190,28 @@ class MainActivity : ComponentActivity() {
             triggerHaptic(context, haptic, style, feedbackView)
         }
 
+        fun weeklyPauseKey(rule: Rule) = "wk_skip:${date}:${rule.id}"
+
+        fun isWeeklyPaused(rule: Rule): Boolean = prefs.getBoolean(weeklyPauseKey(rule), false)
+
         fun currentTodayProgress() = calculateTodayProgress(
-            dailyRules, weeklyRules, { doneCount(it) }, { doneTodayForWeekly(it) }
+            dailyRules, weeklyRules, { doneCount(it) }, { doneTodayForWeekly(it) }, ::isWeeklyPaused
         )
 
+        fun toggleWeeklyPause(rule: Rule) {
+            if (rule.kind != RuleKind.WEEKLY || rule.archived || doneTodayForWeekly(rule)) return
+            val paused = isWeeklyPaused(rule)
+            if (!paused && doneCount(rule) >= totalOf(rule)) return
+            val wasComplete = currentTodayProgress().complete
+            val editor = prefs.edit()
+            if (paused) editor.remove(weeklyPauseKey(rule)) else editor.putBoolean(weeklyPauseKey(rule), true)
+            editor.apply()
+            tick++
+            fireFeedback(!paused, paused, !paused && !wasComplete && currentTodayProgress().complete)
+        }
+
         fun stepWeeklyRule(rule: Rule, delta: Int) {
+            if (isWeeklyPaused(rule)) return
             val wasDayComplete = currentTodayProgress().complete
             val target = totalOf(rule)
             val current = doneCount(rule)
@@ -1308,7 +1354,9 @@ class MainActivity : ComponentActivity() {
                             rules = dailyRules,
                             weekly = weeklyRules,
                             count = ::doneCount,
-                            doneTodayWeekly = ::doneTodayForWeekly,
+                            doneTodayWeekly = { doneTodayForWeekly(it) },
+                            pausedTodayWeekly = ::isWeeklyPaused,
+                            onToggleWeeklyPause = ::toggleWeeklyPause,
                             testMode = testMode,
                             onStepWeeklyRule = ::stepWeeklyRule,
                             onToggle = ::toggle,
@@ -1597,8 +1645,18 @@ private fun DisplayCount(done: Int, total: Int, ndot: FontFamily, fontSize: Text
     val weight = if (useDot) FontWeight.Normal else FontWeight.Light
     val spacing = if (useDot) 1.sp else (-0.8).sp
     val digitSlots = maxOf(1, total.toString().length, done.toString().length)
-    val numberWidth = (fontSize.value * 0.64f * digitSlots).dp
-    val slashWidth = (fontSize.value * 0.42f).dp
+    val measurer = rememberTextMeasurer()
+    val density = LocalDensity.current
+    val digitStyle = TextStyle(fontFamily = family, fontWeight = weight, fontSize = fontSize,
+        lineHeight = fontSize, letterSpacing = spacing, fontFeatureSettings = "tnum",
+        platformStyle = PlatformTextStyle(includeFontPadding = false))
+    val slashStyle = digitStyle.copy(fontFamily = FontFamily.Default, letterSpacing = 0.sp)
+    val numberWidth = with(density) {
+        ('0'..'9').maxOf { measurer.measure(it.toString(), style = digitStyle, maxLines = 1).size.width }
+            .times(digitSlots).toDp() + 2.dp
+    }
+    val slashWidth = with(density) { measurer.measure("/", style = slashStyle, maxLines = 1).size.width.toDp() } +
+        if (useDot) 14.dp else 8.dp
     Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.Center) {
         Box(Modifier.width(numberWidth), contentAlignment = Alignment.CenterEnd) {
             Text(done.toString(), color = White, fontFamily = family, fontWeight = weight,
@@ -1607,10 +1665,7 @@ private fun DisplayCount(done: Int, total: Int, ndot: FontFamily, fontSize: Text
                     platformStyle = PlatformTextStyle(includeFontPadding = false)))
         }
         Box(Modifier.width(slashWidth), contentAlignment = Alignment.Center) {
-            Text("/", color = npNeutral(0xFF5A5A5A), fontFamily = family, fontWeight = weight,
-                fontSize = fontSize, lineHeight = fontSize, maxLines = 1,
-                style = TextStyle(fontFeatureSettings = "tnum",
-                    platformStyle = PlatformTextStyle(includeFontPadding = false)))
+            Text("/", color = npNeutral(0xFF5A5A5A), style = slashStyle, maxLines = 1, softWrap = false)
         }
         Box(Modifier.width(numberWidth), contentAlignment = Alignment.CenterStart) {
             Text(total.toString(), color = npNeutral(0xFF5A5A5A), fontFamily = family,
@@ -1672,12 +1727,13 @@ private fun calculateTodayProgress(
     daily: List<Rule>,
     weekly: List<Rule>,
     count: (Rule) -> Int,
-    checkedToday: (Rule) -> Boolean
+    checkedToday: (Rule) -> Boolean,
+    pausedToday: (Rule) -> Boolean
 ): TodayProgress {
     val mandatoryDaily = daily.filterNot { it.optional }
-    val mandatoryWeekly = weekly.filter { !it.optional && (checkedToday(it) || count(it) < totalOf(it)) }
+    val mandatoryWeekly = weekly.filter { !it.optional && (checkedToday(it) || pausedToday(it) || count(it) < totalOf(it)) }
     return TodayProgress(
-        done = mandatoryDaily.count { count(it) >= totalOf(it) } + mandatoryWeekly.count(checkedToday),
+        done = mandatoryDaily.count { count(it) >= totalOf(it) } + mandatoryWeekly.count { checkedToday(it) || pausedToday(it) },
         total = mandatoryDaily.size + mandatoryWeekly.size
     )
 }
@@ -1690,6 +1746,8 @@ private fun TodayScreen(
     weekly: List<Rule>,
     count: (Rule) -> Int,
     doneTodayWeekly: (Rule) -> Boolean,
+    pausedTodayWeekly: (Rule) -> Boolean,
+    onToggleWeeklyPause: (Rule) -> Unit,
     testMode: Boolean,
     onStepWeeklyRule: (Rule, Int) -> Unit,
     onToggle: (Rule) -> Unit,
@@ -1701,7 +1759,7 @@ private fun TodayScreen(
     val optionalDaily = remember(rules) { rules.filter { it.optional } }
 
     val todayProgress = remember(rules, weekly, date, tick) {
-        calculateTodayProgress(rules, weekly, count, doneTodayWeekly)
+        calculateTodayProgress(rules, weekly, count, doneTodayWeekly, pausedTodayWeekly)
     }
     val totalToday = todayProgress.total
     val doneToday = todayProgress.done
@@ -1849,6 +1907,8 @@ private fun TodayScreen(
                     tick = tick,
                     ruleCount = count,
                     doneTodayWeekly = doneTodayWeekly,
+                    pausedTodayWeekly = pausedTodayWeekly,
+                    onToggleWeeklyPause = onToggleWeeklyPause,
                     testMode = testMode,
                     onStepRule = onStepWeeklyRule,
                     compact = orbit
@@ -2160,6 +2220,8 @@ private fun WeeklyCard(
     tick: Int,
     ruleCount: (Rule) -> Int,
     doneTodayWeekly: (Rule) -> Boolean,
+    pausedTodayWeekly: (Rule) -> Boolean,
+    onToggleWeeklyPause: (Rule) -> Unit,
     testMode: Boolean,
     onStepRule: (Rule, Int) -> Unit,
     compact: Boolean = false
@@ -2175,6 +2237,7 @@ private fun WeeklyCard(
                     val target = totalOf(rule)
                     val count = ruleCount(rule).coerceIn(0, target)
                     val checkedToday = doneTodayWeekly(rule)
+                    val paused = pausedTodayWeekly(rule)
                     val canDec = if (testMode) count > 0 else (checkedToday && count > 0)
                     val canInc = if (testMode) count < target else (!checkedToday && count < target)
                     WeeklyRow(
@@ -2183,8 +2246,11 @@ private fun WeeklyCard(
                         target = target,
                         checkedToday = checkedToday,
                         testMode = testMode,
-                        canDec = canDec,
-                        canInc = canInc,
+                        canDec = !paused && canDec,
+                        canInc = !paused && canInc,
+                        paused = paused,
+                        canPause = !checkedToday && count < target,
+                        onTogglePause = { onToggleWeeklyPause(rule) },
                         compact = compact,
                         onStep = { delta -> onStepRule(rule, delta) }
                     )
@@ -2206,12 +2272,17 @@ private fun WeeklyRow(
     testMode: Boolean,
     canDec: Boolean,
     canInc: Boolean,
+    paused: Boolean,
+    canPause: Boolean,
+    onTogglePause: () -> Unit,
     compact: Boolean = false,
     onStep: (Int) -> Unit
 ) {
     val weekDone = count >= target
     val optSuffix = if (rule.optional) npString(R.string.np_f7fb4627b990) else ""
+    val german = npLocale().language == "de"
     val statusText = when {
+        paused -> if (german) "Heute pausiert" else "Skipped today"
         weekDone -> npString(R.string.np_d9da98f8078e , target, optSuffix)
         checkedToday && !testMode -> npString(R.string.np_0acd32441928 , target, optSuffix)
         testMode -> npString(R.string.np_e4e95c845760 , target, optSuffix)
@@ -2244,6 +2315,15 @@ private fun WeeklyRow(
                         Modifier
                             .size(6.dp)
                             .background(if (idx < count) Red else npNeutral(0xFF333333), CircleShape)
+                    )
+                }
+            }
+            if (paused || canPause) {
+                TextButton(onClick = onTogglePause, contentPadding = PaddingValues(horizontal = 0.dp)) {
+                    Text(
+                        if (paused) (if (german) "Pause aufheben" else "Undo skip")
+                        else (if (german) "Heute pausieren" else "Skip today"),
+                        fontFamily = FontFamily.Default, color = White, fontSize = 11.sp
                     )
                 }
             }
@@ -6213,12 +6293,7 @@ private fun GlyphNav(
             }
             val tint = if (dark) Color(0xFF242429) else Color(0xFFF2F2F1)
             val opacity = if (backdrop == null) .85f else .62f
-            Box(Modifier.matchParentSize().background(
-                Brush.verticalGradient(listOf(
-                    androidx.compose.ui.graphics.lerp(tint, Color.White, if (dark) .13f else .35f).copy(alpha = opacity),
-                    tint.copy(alpha = opacity)
-                ))
-            ))
+            Box(Modifier.matchParentSize().background(tint.copy(alpha = opacity)))
             BoxWithConstraints(
                 modifier = Modifier
                     .fillMaxSize()
