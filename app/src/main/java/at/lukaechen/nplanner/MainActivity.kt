@@ -57,6 +57,15 @@ import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.draw.blur
+import androidx.compose.ui.draw.drawWithContent
+import androidx.compose.ui.graphics.Brush
+import androidx.compose.ui.graphics.drawscope.translate
+import androidx.compose.ui.graphics.layer.GraphicsLayer
+import androidx.compose.ui.graphics.layer.drawLayer
+import androidx.compose.ui.graphics.rememberGraphicsLayer
+import androidx.compose.ui.graphics.luminance
+import androidx.compose.ui.platform.LocalView
 import androidx.compose.ui.geometry.CornerRadius
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.geometry.Size
@@ -117,7 +126,7 @@ private val White get() = NPlannerAppearance.palette.foreground
 private val Muted get() = NPlannerAppearance.palette.muted
 private val Red get() = NPlannerAppearance.palette.accent
 
-private const val NPLANNER_VERSION = "0.55"
+private const val NPLANNER_VERSION = "0.56"
 
 /** FIXED = feste Uhrzeit, INTERVAL = Zeitabstand mit Von/Bis, ALLDAY = ohne Zeit, WEEKLY = Flexibles Wochenziel (1..14x pro Woche). */
 enum class RuleKind { FIXED, INTERVAL, ALLDAY, ONE_TIME, WEEKLY }
@@ -345,23 +354,71 @@ private fun logSummary(ex: Exercise, log: ExerciseLog): String = when (ex.kind) 
 private fun weekStartKey(d: LocalDate): String =
     d.minusDays((d.dayOfWeek.value - 1).toLong()).toString()
 
-private fun triggerHaptic(context: Context, haptic: HapticFeedback, style: HapticStyle) {
+private fun triggerHaptic(
+    context: Context,
+    haptic: HapticFeedback,
+    style: HapticStyle,
+    view: android.view.View? = null
+) {
     if (style != HapticStyle.DAY_COMPLETE) {
-        runCatching { haptic.performHapticFeedback(if (style == HapticStyle.TICK) HapticFeedbackType.TextHandleMove else HapticFeedbackType.LongPress) }
+        val feedback = when (style) {
+            HapticStyle.TASK_DONE -> HapticFeedbackType.LongPress
+            else -> HapticFeedbackType.TextHandleMove
+        }
+        if (style == HapticStyle.UNDO && view != null && Build.VERSION.SDK_INT >= Build.VERSION_CODES.LOLLIPOP) {
+            if (view.performHapticFeedback(android.view.HapticFeedbackConstants.CLOCK_TICK)) return
+        }
+        haptic.performHapticFeedback(feedback)
         return
     }
-    val vibrator = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S)
-        (context.getSystemService(Context.VIBRATOR_MANAGER_SERVICE) as? VibratorManager)?.defaultVibrator
-    else @Suppress("DEPRECATION") (context.getSystemService(Context.VIBRATOR_SERVICE) as? Vibrator)
-    val played = runCatching {
+
+    if (view?.isHapticFeedbackEnabled == false ||
+        android.provider.Settings.System.getInt(
+            context.contentResolver, android.provider.Settings.System.HAPTIC_FEEDBACK_ENABLED, 1
+        ) == 0
+    ) return
+
+    val rhythm = longArrayOf(0L, 24L, 68L, 24L, 122L, 40L, 70L, 28L, 132L, 65L)
+    val strengths = intArrayOf(0, 120, 0, 145, 0, 200, 0, 145, 0, 240)
+    val played = if (context.checkSelfPermission(android.Manifest.permission.VIBRATE) ==
+        android.content.pm.PackageManager.PERMISSION_GRANTED
+    ) runCatching {
+        val vibrator = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
+            (context.getSystemService(Context.VIBRATOR_MANAGER_SERVICE) as? VibratorManager)?.defaultVibrator
+        } else {
+            @Suppress("DEPRECATION")
+            (context.getSystemService(Context.VIBRATOR_SERVICE) as? Vibrator)
+        }
         if (vibrator == null || !vibrator.hasVibrator()) false else {
-            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) vibrator.vibrate(
-                VibrationEffect.createWaveform(longArrayOf(0,20,38,34,54,85), intArrayOf(0,105,0,185,0,255), -1))
-            else @Suppress("DEPRECATION") vibrator.vibrate(longArrayOf(0,22,40,38,56,90), -1)
+            val effect = if (vibrator.hasAmplitudeControl()) {
+                VibrationEffect.createWaveform(rhythm, strengths, -1)
+            } else {
+                VibrationEffect.createWaveform(rhythm, -1)
+            }
+            @Suppress("DEPRECATION")
+            val touch = android.media.AudioAttributes.Builder()
+                .setUsage(android.media.AudioAttributes.USAGE_ASSISTANCE_SONIFICATION)
+                .build()
+            @Suppress("DEPRECATION")
+            vibrator.vibrate(effect, touch)
             true
         }
-    }.getOrDefault(false)
-    if (!played) runCatching { haptic.performHapticFeedback(HapticFeedbackType.LongPress) }
+    }.getOrDefault(false) else false
+
+    if (!played && view != null) {
+        // Keep the five-beat rhythm even without the manifest permission.
+        val clock = android.view.HapticFeedbackConstants.CLOCK_TICK
+        val hit = android.view.HapticFeedbackConstants.LONG_PRESS
+        longArrayOf(0L, 92L, 238L, 348L, 508L).forEachIndexed { index, at ->
+            view.postDelayed({
+                if (view.isAttachedToWindow && view.hasWindowFocus()) {
+                    view.performHapticFeedback(if (index == 2 || index == 4) hit else clock)
+                }
+            }, at)
+        }
+    } else if (!played) {
+        haptic.performHapticFeedback(HapticFeedbackType.LongPress)
+    }
 }
 
 // ---------- NPlanner Exercise JSON Format (NPEF-1) & KI-Prompt ----------
@@ -820,13 +877,27 @@ class MainActivity : ComponentActivity() {
         prefs.edit().putString("workouts_v1", arr.toString()).apply()
     }
 
+    @Suppress("DEPRECATION")
+    private fun applyTransparentNavigationBar() {
+        window.navigationBarColor = android.graphics.Color.TRANSPARENT
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.P) {
+            window.navigationBarDividerColor = android.graphics.Color.TRANSPARENT
+        }
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
+            window.isNavigationBarContrastEnforced = false
+        }
+    }
+
     override fun onCreate(savedInstanceState: Bundle?) {
         NPlannerDriveBackup.applyPendingRestore(this)
         super.onCreate(savedInstanceState)
-        enableEdgeToEdge()
-        WindowCompat.setDecorFitsSystemWindows(window, false)
-        window.navigationBarColor = android.graphics.Color.TRANSPARENT
-        window.isNavigationBarContrastEnforced = false
+        enableEdgeToEdge(
+            navigationBarStyle = androidx.activity.SystemBarStyle.auto(
+                android.graphics.Color.TRANSPARENT,
+                android.graphics.Color.TRANSPARENT
+            )
+        )
+        applyTransparentNavigationBar()
         NPlannerAppearance.initialize(this)
         seedEditableWorkoutTemplates(this)
         // Room is now the primary and only user-data store.
@@ -849,8 +920,7 @@ class MainActivity : ComponentActivity() {
             androidx.compose.runtime.SideEffect {
                 @Suppress("DEPRECATION")
                 window.statusBarColor = NPlannerAppearance.palette.background.toArgb()
-                @Suppress("DEPRECATION")
-                window.navigationBarColor = Color.Transparent.toArgb()
+                applyTransparentNavigationBar()
                 androidx.core.view.WindowCompat.getInsetsController(window, window.decorView).apply {
                     isAppearanceLightStatusBars = !effectiveDark
                     isAppearanceLightNavigationBars = !effectiveDark
@@ -892,6 +962,7 @@ class MainActivity : ComponentActivity() {
     private fun NPlanner(ndot: FontFamily) {
         val context = LocalContext.current
         val haptic = LocalHapticFeedback.current
+        val feedbackView = LocalView.current
         var rules by remember { mutableStateOf(loadRules()) }
         var exercises by remember { mutableStateOf(loadExercises()) }
         var workouts by remember { mutableStateOf(loadWorkouts(exercises)) }
@@ -1070,17 +1141,14 @@ class MainActivity : ComponentActivity() {
             return live
         }
 
-        fun fireFeedback(becameDone: Boolean, becameUndone: Boolean) {
-            if (becameDone) {
-                val snap = daySnapshot(date)
-                triggerHaptic(
-                    context = context,
-                    haptic = haptic,
-                    style = if (snap.total > 0 && snap.done >= snap.total) HapticStyle.DAY_COMPLETE else HapticStyle.TASK_DONE
-                )
-            } else if (becameUndone) {
-                triggerHaptic(context = context, haptic = haptic, style = HapticStyle.UNDO)
+        fun fireFeedback(becameDone: Boolean, becameUndone: Boolean, dayFinished: Boolean = false) {
+            val style = when {
+                dayFinished -> HapticStyle.DAY_COMPLETE
+                becameDone -> HapticStyle.TASK_DONE
+                becameUndone -> HapticStyle.UNDO
+                else -> return
             }
+            triggerHaptic(context, haptic, style, feedbackView)
         }
 
         fun stepWeeklyRule(rule: Rule, delta: Int) {
@@ -1152,10 +1220,14 @@ class MainActivity : ComponentActivity() {
                     becameUndone = wasDone
                 }
             }
+            val wasDayComplete = daySnapshot(date).let { it.total > 0 && it.done >= it.total }
             e.apply()
             persistTodaySnapshot(date)
             tick++
-            fireFeedback(becameDone = becameDone, becameUndone = becameUndone)
+            val dayFinished = becameDone && !wasDayComplete && daySnapshot(date).let {
+                it.total > 0 && it.done >= it.total
+            }
+            fireFeedback(becameDone, becameUndone, dayFinished)
         }
 
         fun deleteRule(ruleId: String) {
@@ -1282,7 +1354,7 @@ class MainActivity : ComponentActivity() {
                                     }
                                     saveWorkouts(workouts)
                                 }
-                                triggerHaptic(context, haptic, HapticStyle.DAY_COMPLETE)
+                                triggerHaptic(context, haptic, HapticStyle.DAY_COMPLETE, feedbackView)
                             },
                             onDeleteExercise = { exId ->
                                 exercises.find { it.id == exId }?.mediaPath?.takeIf { it.isNotBlank() }?.let { path ->
@@ -1397,6 +1469,9 @@ class MainActivity : ComponentActivity() {
             }
         }
 
+        val canBlurNav = Build.VERSION.SDK_INT >= Build.VERSION_CODES.S && feedbackView.isHardwareAccelerated
+        val navBackdrop = rememberGraphicsLayer()
+        var backdropOrigin by remember { mutableStateOf(Offset.Zero) }
         CompositionLocalProvider(LocalDotHeadings provides dotHeadings) {
             Box(Modifier.fillMaxSize().background(Bg)) {
                 HorizontalPager(
@@ -1404,7 +1479,16 @@ class MainActivity : ComponentActivity() {
                     key = { slot -> pageOrder[slot] },
                     beyondViewportPageCount = 1,
                     userScrollEnabled = directTarget == null,
-                    modifier = Modifier.fillMaxSize()
+                    modifier = Modifier.fillMaxSize().then(
+                        if (canBlurNav) Modifier
+                            .onGloballyPositioned { backdropOrigin = it.positionInRoot() }
+                            .drawWithContent {
+                                navBackdrop.record { this@drawWithContent.drawContent() }
+                                drawLayer(navBackdrop)
+                            }
+                            .background(Bg)
+                        else Modifier
+                    )
                 ) { slot ->
                     PageContent(pageOrder[slot])
                 }
@@ -1412,6 +1496,8 @@ class MainActivity : ComponentActivity() {
                     pagerState = pagerState,
                     directTarget = directTarget,
                     compact = navCompact,
+                    backdrop = if (canBlurNav) navBackdrop else null,
+                    backdropOrigin = { backdropOrigin },
                     select = ::selectPage,
                     modifier = Modifier.align(Alignment.BottomCenter)
                 )
@@ -1770,10 +1856,15 @@ private fun ProgressOrbit(
 ) {
     val complete = total > 0 && done >= total
     val celebration = remember { Animatable(1f) }
+    var previouslyComplete by remember { mutableStateOf(complete) }
     LaunchedEffect(complete) {
-        if (complete) {
+        val justCompleted = complete && !previouslyComplete
+        previouslyComplete = complete
+        if (justCompleted) {
             celebration.snapTo(0f)
-            celebration.animateTo(1f, tween(1850, easing = FastOutSlowInEasing))
+            celebration.animateTo(1f, tween(1850, easing = androidx.compose.animation.core.LinearEasing))
+        } else {
+            celebration.snapTo(1f)
         }
     }
     Box(Modifier.fillMaxWidth().height(boxHeight), contentAlignment = Alignment.Center) {
@@ -1827,32 +1918,27 @@ private fun ProgressOrbit(
             }
         }
         if (complete && celebration.value < .88f) {
-            val pop = (celebration.value / .38f).coerceIn(0f,1f)
             Canvas(Modifier.size(ringSize)) {
-                val center = Offset(size.width/2f,size.height/2f)
-                val dot = 3.2.dp.toPx()
+                // The glyph stays in place. Only the individual dots light up.
                 val pattern = listOf(
-                    -4 to 0, -3 to 1, -2 to 2, -1 to 3,
-                    0 to 2, 1 to 1, 2 to 0, 3 to -1, 4 to -2, 5 to -3
+                    -5 to 0, -4 to 1, -3 to 2, -2 to 3, -1 to 4,
+                    0 to 3, 1 to 2, 2 to 1, 3 to 0, 4 to -1, 5 to -2, 6 to -3
                 )
-                val visible = (pattern.size * pop).toInt().coerceIn(0, pattern.size)
-                val scale = .72f + .36f * kotlin.math.sin(pop * Math.PI.toFloat()/2f)
-                pattern.take(visible).forEachIndexed { index, pair ->
-                    val x=center.x + pair.first*dot*1.55f*scale
-                    val y=center.y + pair.second*dot*1.55f*scale
-                    drawCircle(if(index==visible-1) Red else White,dot*.48f,Offset(x,y))
-                }
-                val burst=((celebration.value-.20f)/.58f).coerceIn(0f,1f)
-                repeat(20) { i ->
-                    val a=(i*18.0-90.0)*Math.PI/180.0
-                    val stagger=(i%5)*.045f
-                    val q=((burst-stagger)/(1f-stagger)).coerceIn(0f,1f)
-                    val r=size.minDimension*(.20f+.34f*q)
-                    val x=center.x+kotlin.math.cos(a).toFloat()*r
-                    val y=center.y+kotlin.math.sin(a).toFloat()*r
-                    val alpha=(1f-q).coerceIn(0f,1f)
-                    if(i%4==0) drawRoundRect(Red.copy(alpha=alpha),Offset(x-3.dp.toPx(),y-1.dp.toPx()),Size(6.dp.toPx(),2.dp.toPx()),CornerRadius(1.dp.toPx()))
-                    else drawCircle(White.copy(alpha=alpha),if(i%3==0)2.dp.toPx() else 1.25.dp.toPx(),Offset(x,y))
+                val step = size.minDimension * .048f
+                val time = celebration.value
+                val fade = ((.88f - time) / .12f).coerceIn(0f, 1f)
+                pattern.forEachIndexed { index, (x, y) ->
+                    val lighting = ((time - index * .035f) / .10f).coerceIn(0f, 1f)
+                    if (lighting > 0f) {
+                        val tip = ((1f - lighting) * 1.4f).coerceIn(0f, 1f)
+                        val color = androidx.compose.ui.graphics.lerp(White, Red, tip)
+                        drawCircle(
+                            color = color,
+                            radius = step * .37f,
+                            center = Offset(center.x + (x - .5f) * step, center.y + (y - .5f) * step),
+                            alpha = lighting * fade
+                        )
+                    }
                 }
             }
         } else {
@@ -1861,46 +1947,6 @@ private fun ProgressOrbit(
                 Text(if (complete) npString(R.string.np_595b69683dcf) else npString(R.string.np_71f43d0f0475),
                     color = Muted, fontFamily = FontFamily.Default, fontSize = 9.sp, letterSpacing = 2.sp)
             }
-        }
-    }
-}
-
-@Composable
-private fun DayCompleteCelebration(ndot: FontFamily, compact: Boolean, title: String, subtitle: String) {
-    val ring = remember { Animatable(0f) }
-    val check = remember { Animatable(0f) }
-    val content = remember { Animatable(0f) }
-    LaunchedEffect(Unit) {
-        ring.animateTo(1f, tween(420, easing = FastOutSlowInEasing))
-        check.animateTo(1f, spring(dampingRatio = Spring.DampingRatioMediumBouncy, stiffness = Spring.StiffnessLow))
-        content.animateTo(1f, tween(280, easing = FastOutSlowInEasing))
-    }
-    Column(Modifier.fillMaxWidth().padding(top = if (compact) 8.dp else 16.dp),
-        horizontalAlignment = Alignment.CenterHorizontally) {
-        Box(Modifier.size(if (compact) 74.dp else 86.dp), contentAlignment = Alignment.Center) {
-            Canvas(Modifier.fillMaxSize()) {
-                val center = Offset(size.width / 2f, size.height / 2f)
-                val radius = size.minDimension * 0.48f
-                drawCircle(Red.copy(alpha = (1f - ring.value) * .22f), radius * ring.value,
-                    center, style = Stroke(2.dp.toPx()))
-                drawCircle(White, radius * .58f * check.value.coerceAtLeast(.01f), center,
-                    style = Stroke(3.dp.toPx(), cap = StrokeCap.Round))
-                if (check.value > .25f) {
-                    val local = ((check.value - .25f) / .75f).coerceIn(0f, 1f)
-                    val p1 = Offset(size.width*.34f,size.height*.51f)
-                    val p2 = Offset(size.width*.46f,size.height*.63f)
-                    val p3 = Offset(size.width*.69f,size.height*.37f)
-                    if (local <= .38f) drawLine(White,p1,Offset(p1.x+(p2.x-p1.x)*(local/.38f),p1.y+(p2.y-p1.y)*(local/.38f)),3.dp.toPx(),StrokeCap.Round)
-                    else { drawLine(White,p1,p2,3.dp.toPx(),StrokeCap.Round); val second=(local-.38f)/.62f
-                        drawLine(White,p2,Offset(p2.x+(p3.x-p2.x)*second,p2.y+(p3.y-p2.y)*second),3.dp.toPx(),StrokeCap.Round) }
-                }
-            }
-        }
-        Column(Modifier.graphicsLayer { alpha=content.value; translationY=(1f-content.value)*14.dp.toPx() },
-            horizontalAlignment = Alignment.CenterHorizontally) {
-            DisplayTitle(title, ndot, fontSize = 28.sp)
-            Text(subtitle, color = Muted, fontSize = 13.sp, textAlign = TextAlign.Center,
-                modifier = Modifier.padding(top = 6.dp, bottom = 8.dp))
         }
     }
 }
@@ -6071,6 +6117,8 @@ private fun GlyphNav(
     pagerState: androidx.compose.foundation.pager.PagerState,
     directTarget: Int?,
     compact: Boolean,
+    backdrop: GraphicsLayer?,
+    backdropOrigin: () -> Offset,
     select: (Int) -> Unit,
     modifier: Modifier
 ) {
@@ -6096,72 +6144,97 @@ private fun GlyphNav(
     val navWidth by animateDpAsState(if (compact) 264.dp else 322.dp, tween(220), label = "nav_width")
     val navHeight by animateDpAsState(if (compact) 52.dp else 62.dp, tween(220), label = "nav_height")
     val navBottom by animateDpAsState(if (compact) 30.dp else 24.dp, tween(220), label = "nav_bottom")
+    val minBottom = with(LocalDensity.current) { WindowInsets.navigationBars.getBottom(this).toDp() } + 8.dp
+    val shape = RoundedCornerShape(percent = 50)
+    val dark = Bg.luminance() < .5f
+    val highlight = if (dark) Color.White else Color(0xFF333335)
     Surface(
-        modifier = modifier.padding(bottom = navBottom).width(navWidth).height(navHeight),
-        color = Color(0xB8323232),
-        shape = RoundedCornerShape(31.dp),
-        border = androidx.compose.foundation.BorderStroke(1.dp, White.copy(alpha = .16f)),
-        shadowElevation = 6.dp
+        modifier = modifier.padding(bottom = maxOf(navBottom, minBottom)).width(navWidth).height(navHeight),
+        color = Color.Transparent,
+        shape = shape,
+        border = androidx.compose.foundation.BorderStroke(1.dp, highlight.copy(alpha = .23f)),
+        shadowElevation = 0.dp
     ) {
-        BoxWithConstraints(
-            modifier = Modifier
-                .fillMaxSize()
-                .padding(6.dp)
-        ) {
-            val spacing = 4.dp
-            val pillWidth = (maxWidth - spacing * 3) / 4f
-            val pillOffset = (pillWidth + spacing) * pillFraction
-
-            Box(
+        Box(Modifier.fillMaxSize().clip(shape)) {
+            if (backdrop != null) {
+                var navOrigin by remember { mutableStateOf(Offset.Zero) }
+                Canvas(
+                    Modifier.matchParentSize()
+                        .onGloballyPositioned { navOrigin = it.positionInRoot() }
+                        .blur(16.dp)
+                ) {
+                    val offset = navOrigin - backdropOrigin()
+                    translate(left = -offset.x, top = -offset.y) { drawLayer(backdrop) }
+                }
+            }
+            val tint = if (dark) Color(0xFF242429) else Color(0xFFF2F2F1)
+            val opacity = if (backdrop == null) .85f else .62f
+            Box(Modifier.matchParentSize().background(
+                Brush.verticalGradient(listOf(
+                    androidx.compose.ui.graphics.lerp(tint, Color.White, if (dark) .13f else .35f).copy(alpha = opacity),
+                    tint.copy(alpha = opacity)
+                ))
+            ))
+            BoxWithConstraints(
                 modifier = Modifier
-                    .offset(x = pillOffset)
-                    .width(pillWidth)
-                    .fillMaxHeight()
-                    .clip(CircleShape)
-                    .background(White)
-            )
-
-            Row(
-                modifier = Modifier.fillMaxSize(),
-                horizontalArrangement = Arrangement.spacedBy(spacing)
+                    .fillMaxSize()
+                    .padding(6.dp)
             ) {
-                glyphs.forEachIndexed { i, glyph ->
-                    val interactionSource = remember { MutableInteractionSource() }
-                    val distance = kotlin.math.abs(pillFraction - i).coerceIn(0f, 1f)
-                    val activeWeight = 1f - distance
-                    val activeTab = directTarget ?: pagerState.currentPage
-                    val iconScale by animateFloatAsState(
-                        targetValue = if (activeTab == i) 1.06f else 0.96f,
-                        animationSpec = spring(dampingRatio = Spring.DampingRatioMediumBouncy, stiffness = Spring.StiffnessMediumLow),
-                        label = "nav_icon_scale"
-                    )
-                    val iconColor = androidx.compose.ui.graphics.lerp(
-                        npNeutral(0xFF969696),
-                        Bg,
-                        activeWeight
-                    )
+                val spacing = 4.dp
+                val pillWidth = (maxWidth - spacing * 3) / 4f
+                val pillOffset = (pillWidth + spacing) * pillFraction
 
-                    Box(
-                        modifier = Modifier
-                            .weight(1f)
-                            .fillMaxHeight()
-                            .clip(CircleShape)
-                            .clickable(
-                                interactionSource = interactionSource,
-                                indication = null
-                            ) {
-                                    triggerHaptic(navContext, navHaptic, HapticStyle.TICK)
-                                    select(i)
-                                },
-                        contentAlignment = Alignment.Center
-                    ) {
+                Box(
+                    modifier = Modifier
+                        .offset(x = pillOffset)
+                        .width(pillWidth)
+                        .fillMaxHeight()
+                        .clip(CircleShape)
+                        .background(White)
+                )
+
+                Row(
+                    modifier = Modifier.fillMaxSize(),
+                    horizontalArrangement = Arrangement.spacedBy(spacing)
+                ) {
+                    glyphs.forEachIndexed { i, glyph ->
+                        val interactionSource = remember { MutableInteractionSource() }
+                        val distance = kotlin.math.abs(pillFraction - i).coerceIn(0f, 1f)
+                        val activeWeight = 1f - distance
+                        val activeTab = directTarget ?: pagerState.currentPage
+                        val iconScale by animateFloatAsState(
+                            targetValue = if (activeTab == i) 1.06f else 0.96f,
+                            animationSpec = spring(dampingRatio = Spring.DampingRatioMediumBouncy, stiffness = Spring.StiffnessMediumLow),
+                            label = "nav_icon_scale"
+                        )
+                        val iconColor = androidx.compose.ui.graphics.lerp(
+                            npNeutral(0xFF969696),
+                            Bg,
+                            activeWeight
+                        )
+
                         Box(
-                            Modifier.graphicsLayer {
-                                scaleX = iconScale
-                                scaleY = iconScale
-                            }
+                            modifier = Modifier
+                                .weight(1f)
+                                .fillMaxHeight()
+                                .clip(CircleShape)
+                                .clickable(
+                                    interactionSource = interactionSource,
+                                    indication = null
+                                ) {
+                                        triggerHaptic(navContext, navHaptic, HapticStyle.TICK)
+                                        select(i)
+                                    },
+                            contentAlignment = Alignment.Center
                         ) {
-                            NavIcon(glyph, iconColor)
+                            Box(
+                                Modifier.graphicsLayer {
+                                    scaleX = iconScale
+                                    scaleY = iconScale
+                                }
+                            ) {
+                                NavIcon(glyph, iconColor)
+                            }
                         }
                     }
                 }
