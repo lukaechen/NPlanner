@@ -127,7 +127,7 @@ private val White get() = NPlannerAppearance.palette.foreground
 private val Muted get() = NPlannerAppearance.palette.muted
 private val Red get() = NPlannerAppearance.palette.accent
 
-private const val NPLANNER_VERSION = "0.60"
+private const val NPLANNER_VERSION = "0.61"
 
 /** FIXED = feste Uhrzeit, INTERVAL = Zeitabstand mit Von/Bis, ALLDAY = ohne Zeit, WEEKLY = Flexibles Wochenziel (1..14x pro Woche). */
 enum class RuleKind { FIXED, INTERVAL, ALLDAY, ONE_TIME, WEEKLY }
@@ -371,13 +371,16 @@ private fun triggerHaptic(
     val lightweight = undo || style == HapticStyle.TICK
     val (rhythm, strengths) = when (style) {
         HapticStyle.TICK -> longArrayOf(0L, 10L) to intArrayOf(0, 60)
-        HapticStyle.UNDO -> longArrayOf(0L, 18L) to intArrayOf(0, 85)
-        HapticStyle.TASK_DONE -> longArrayOf(0L, 33L) to intArrayOf(0, 175)
+        HapticStyle.UNDO -> longArrayOf(0L, 12L) to intArrayOf(0, 55)
+        HapticStyle.TASK_DONE -> longArrayOf(0L, 38L) to intArrayOf(0, 225)
         HapticStyle.CONFIRM -> longArrayOf(0L, 18L, 45L, 31L) to intArrayOf(0, 100, 0, 185)
         HapticStyle.DELETE -> longArrayOf(0L, 38L, 55L, 17L) to intArrayOf(0, 205, 0, 95)
         HapticStyle.DAY_COMPLETE ->
-            longArrayOf(0L, 18L, 52L, 24L, 135L, 25L, 48L, 35L, 48L, 47L, 158L, 23L, 66L, 75L) to
-                intArrayOf(0, 85, 0, 125, 0, 135, 0, 175, 0, 215, 0, 140, 0, 250)
+            // Double tap, rising swell, syncopated triple, then a firm hit with a soft echo.
+            longArrayOf(0L, 16L, 44L, 26L, 110L, 23L, 26L, 32L, 155L,
+                16L, 38L, 21L, 70L, 36L, 125L, 52L, 28L, 29L, 24L, 18L, 90L, 16L) to
+                intArrayOf(0, 95, 0, 145, 0, 125, 175, 225, 0,
+                    115, 0, 155, 0, 215, 0, 255, 170, 105, 65, 40, 0, 80)
     }
     val played = if (context.checkSelfPermission(android.Manifest.permission.VIBRATE) ==
         android.content.pm.PackageManager.PERMISSION_GRANTED
@@ -393,7 +396,14 @@ private fun triggerHaptic(
             val effect = if (vibrator.hasAmplitudeControl()) {
                 VibrationEffect.createWaveform(rhythm, strengths, -1)
             } else {
-                VibrationEffect.createWaveform(rhythm, -1)
+                val alternating = mutableListOf(0L)
+                var on = false
+                rhythm.forEachIndexed { index, duration ->
+                    val pulse = strengths[index] != 0
+                    if (pulse == on) alternating[alternating.lastIndex] += duration
+                    else { alternating.add(duration); on = pulse }
+                }
+                VibrationEffect.createWaveform(alternating.toLongArray(), -1)
             }
             @Suppress("DEPRECATION")
             val touch = android.media.AudioAttributes.Builder()
@@ -425,8 +435,8 @@ private fun triggerHaptic(
                 val (timing, effects) = when (style) {
                     HapticStyle.CONFIRM -> longArrayOf(0L, 65L) to intArrayOf(soft, firm)
                     HapticStyle.DELETE -> longArrayOf(0L, 92L) to intArrayOf(firm, soft)
-                    else -> longArrayOf(0L, 70L, 229L, 302L, 385L, 590L, 679L) to
-                        intArrayOf(soft, click, click, click, firm, soft, firm)
+                    else -> longArrayOf(0L, 60L, 196L, 432L, 486L, 577L, 738L, 979L) to
+                        intArrayOf(soft, click, firm, soft, click, click, firm, soft)
                 }
                 timing.forEachIndexed { index, at ->
                     if (index == 0) view.performHapticFeedback(effects[index])
@@ -950,14 +960,15 @@ class MainActivity : ComponentActivity() {
                 else -> systemDark
             }
             // Single-activity app: snapshot-backed palette also works inside Canvas callbacks.
-            NPlannerAppearance.applyPalette(effectiveDark)
+            LaunchedEffect(effectiveDark) { NPlannerAppearance.animatePalette(effectiveDark) }
             androidx.compose.runtime.SideEffect {
                 @Suppress("DEPRECATION")
                 window.statusBarColor = NPlannerAppearance.palette.background.toArgb()
                 applyTransparentNavigationBar()
                 androidx.core.view.WindowCompat.getInsetsController(window, window.decorView).apply {
-                    isAppearanceLightStatusBars = !effectiveDark
-                    isAppearanceLightNavigationBars = !effectiveDark
+                    val lightBackground = NPlannerAppearance.palette.background.luminance() > .36f
+                    isAppearanceLightStatusBars = lightBackground
+                    isAppearanceLightNavigationBars = lightBackground
                 }
             }
             // Read language here so all visible screens update without recreating the Activity.
@@ -1074,7 +1085,15 @@ class MainActivity : ComponentActivity() {
                     (r.createdDate.isBlank() || r.createdDate <= d.toString())
             }
             val mandatoryDailyForDay = allDailyForDay.filterNot { it.optional }
-            val weeklyDoneOnDay = weeklyRules.filter { doneTodayForWeekly(it, d) }
+            val weeklyOnDay = if (d.isAfter(date)) emptyList() else rules.asSequence()
+                .filter { it.kind == RuleKind.WEEKLY && (it.createdDate.isBlank() || it.createdDate <= d.toString()) }
+                .mapNotNull { rule ->
+                    val checked = doneTodayForWeekly(rule, d)
+                    val paused = prefs.getBoolean("wk_skip:${d}:${rule.id}", false)
+                    if (!checked && !paused && (d != date || rule.archived)) null
+                    else CalendarWeeklyEntry(rule.id, rule.name, weeklyProgressThroughDay(rule, d),
+                        totalOf(rule), checked, paused)
+                }.toList()
             // Flexible weekly goals are shown as x/target in the day details, but they do
             // not decide whether the day itself is complete.
             val doneDaily = mandatoryDailyForDay.count { doneCount(it, d) >= totalOf(it) }
@@ -1083,7 +1102,7 @@ class MainActivity : ComponentActivity() {
                 done = doneDaily,
                 total = mandatoryDailyForDay.size,
                 dailyRules = allDailyForDay,
-                weeklyDoneRules = weeklyDoneOnDay
+                weeklyEntries = weeklyOnDay
             )
         }
 
@@ -1093,15 +1112,7 @@ class MainActivity : ComponentActivity() {
             snap.dailyRules.forEach { r ->
                 items.put(JSONArray().put(r.name).put(doneCount(r, d)).put(totalOf(r)).put(if (r.optional) 1 else 0))
             }
-            snap.weeklyDoneRules.forEach { r ->
-                items.put(
-                    JSONArray()
-                        .put("${r.name} (Wochenziel)")
-                        .put(weeklyProgressThroughDay(r, d))
-                        .put(totalOf(r))
-                        .put(1)
-                )
-            }
+            snap.weeklyEntries.filter { it.checked || it.paused }.forEach { items.put(it.toSnapshotJson()) }
             val obj = JSONObject().put("done", snap.done).put("total", snap.total).put("items", items)
             prefs.edit().putString("snap:${d}", obj.toString()).apply()
         }
@@ -1124,15 +1135,7 @@ class MainActivity : ComponentActivity() {
                         snap.dailyRules.forEach { r ->
                             items.put(JSONArray().put(r.name).put(doneCount(r, d)).put(totalOf(r)).put(if (r.optional) 1 else 0))
                         }
-                        snap.weeklyDoneRules.forEach { r ->
-                            items.put(
-                    JSONArray()
-                        .put("${r.name} (Wochenziel)")
-                        .put(weeklyProgressThroughDay(r, d))
-                        .put(totalOf(r))
-                        .put(1)
-                )
-                        }
+                        snap.weeklyEntries.filter { it.checked || it.paused }.forEach { items.put(it.toSnapshotJson()) }
                         prefs.edit().putString("snap:${d}", obj.put("items", items).toString()).apply()
                     }
                 }
@@ -1150,25 +1153,38 @@ class MainActivity : ComponentActivity() {
                     val sDone = o.optInt("done", live.done)
                     val sTotal = o.optInt("total", live.total)
                     val arr = o.optJSONArray("items")
-                    val items = if (arr == null) emptyList() else (0 until arr.length()).mapNotNull { i ->
-                        runCatching {
-                            val a = arr.getJSONArray(i)
-                            val storedName = a.getString(0)
-                            val weeklyRule = if (storedName.endsWith(" (Wochenziel)")) {
-                                weeklyRules.firstOrNull { it.name == storedName.removeSuffix(" (Wochenziel)") }
-                            } else null
-                            HistoricalTask(
-                                name = storedName,
-                                done = weeklyRule?.let { weeklyProgressThroughDay(it, d) } ?: a.getInt(1),
-                                target = weeklyRule?.let(::totalOf) ?: a.getInt(2),
-                                optional = weeklyRule != null || a.optInt(3) == 1
-                            )
-                        }.getOrNull()
+                    val items = mutableListOf<HistoricalTask>()
+                    val weekly = mutableListOf<CalendarWeeklyEntry>()
+                    val legacySuffix = " (Wochenziel)"
+                    for (i in 0 until (arr?.length() ?: 0)) {
+                        val item = arr?.optJSONArray(i) ?: continue
+                        val name = item.optString(0)
+                        if (name.isBlank()) continue
+                        val count = item.optInt(1)
+                        val target = item.optInt(2, 1)
+                        val metadata = item.optJSONObject(4)
+                        when {
+                            metadata?.optString("kind") == "weekly" -> weekly.add(CalendarWeeklyEntry(
+                                metadata.optString("id"), name, count, target,
+                                metadata.optBoolean("checked"), metadata.optBoolean("paused")
+                            ))
+                            metadata == null && item.optInt(3) == 1 && name.endsWith(legacySuffix) -> {
+                                val label = name.removeSuffix(legacySuffix)
+                                val candidates = live.weeklyEntries.filter { it.name == label && it.checked }
+                                weekly.add(CalendarWeeklyEntry(candidates.singleOrNull()?.id, label,
+                                    count, target, checked = true, paused = false))
+                            }
+                            else -> items.add(HistoricalTask(name, count, target, item.optInt(3) == 1))
+                        }
                     }
-                    val requiredItems = items.filterNot { it.optional || it.name.endsWith(" (Wochenziel)") }
+                    val knownIds = weekly.mapNotNull { it.id }.toSet()
+                    val legacyNames = weekly.filter { it.id == null }.map { it.name }.toSet()
+                    val additions = live.weeklyEntries.filter { it.id !in knownIds && it.name !in legacyNames }
+                    val requiredItems = items.filterNot { it.optional }
                     val repairedDone = if (items.isNotEmpty()) requiredItems.sumOf { it.done.coerceAtMost(it.target) } else sDone
                     val repairedTotal = if (items.isNotEmpty()) requiredItems.sumOf { it.target } else sTotal
-                    live.copy(done = repairedDone, total = repairedTotal, historicalTasks = items)
+                    live.copy(done = repairedDone, total = repairedTotal, historicalTasks = items,
+                        weeklyEntries = weekly + additions)
                 }.getOrNull()
                 if (parsed != null) return parsed
             }
@@ -1201,6 +1217,7 @@ class MainActivity : ComponentActivity() {
             val editor = prefs.edit()
             if (paused) editor.remove(weeklyPauseKey(rule)) else editor.putBoolean(weeklyPauseKey(rule), true)
             editor.apply()
+            persistTodaySnapshot(date)
             tick++
             fireFeedback(!paused, paused, !paused && !wasComplete && currentTodayProgress().complete)
         }
@@ -1587,7 +1604,8 @@ class MainActivity : ComponentActivity() {
                     }
                     saveRules(rules)
                     persistTodaySnapshot(date)
-                    triggerHaptic(context, haptic, HapticStyle.TASK_DONE)
+                    tick++
+                    triggerHaptic(context, haptic, HapticStyle.CONFIRM, feedbackView)
                     addDialog = false
                     editingRule = null
                 }
@@ -1598,19 +1616,27 @@ class MainActivity : ComponentActivity() {
 
 private data class HistoricalTask(val name: String, val done: Int, val target: Int, val optional: Boolean)
 
+private data class CalendarWeeklyEntry(
+    val id: String?, val name: String, val count: Int, val target: Int,
+    val checked: Boolean, val paused: Boolean
+) {
+    fun toSnapshotJson(): JSONArray = JSONArray().put(name).put(count).put(target).put(1).put(
+        JSONObject().put("kind", "weekly").put("id", id).put("checked", checked).put("paused", paused)
+    )
+}
+
 private data class DaySnapshot(
     val date: LocalDate,
     val done: Int,
     val total: Int,
     val dailyRules: List<Rule>,
-    val weeklyDoneRules: List<Rule>,
+    val weeklyEntries: List<CalendarWeeklyEntry>,
     val historicalTasks: List<HistoricalTask> = emptyList()
 ) {
     val state: DayCompletionState
         get() = when {
-            total <= 0 -> DayCompletionState.NONE
-            done >= total -> DayCompletionState.ALL
-            done > 0 -> DayCompletionState.PARTIAL
+            total > 0 && done >= total -> DayCompletionState.ALL
+            done > 0 || weeklyEntries.any { it.checked } -> DayCompletionState.PARTIAL
             else -> DayCompletionState.NONE
         }
 }
@@ -1685,6 +1711,7 @@ private fun Screen(
     subtitle: String,
     scrollable: Boolean = true,
     compactHeader: Boolean = false,
+    headerGap: Dp = if (compactHeader) 8.dp else 14.dp,
     content: @Composable ColumnScope.() -> Unit
 ) {
     val base = Modifier
@@ -1705,7 +1732,7 @@ private fun Screen(
             fontSize = if (compactHeader) 34.sp else 38.sp
         )
         Text(subtitle, color = Muted, fontSize = if (compactHeader) 12.sp else 13.sp)
-        Spacer(Modifier.height(if (compactHeader) 8.dp else 14.dp))
+        Spacer(Modifier.height(headerGap))
         content()
         if (scrollable) FloatingNavScrollClearance()
     }
@@ -2938,7 +2965,7 @@ private fun DayDetailCard(
                         }
                     }
                 }
-            } else if (snap.dailyRules.isNotEmpty() || snap.weeklyDoneRules.isNotEmpty()) {
+            } else if (snap.dailyRules.isNotEmpty()) {
                 HorizontalDivider(color = npNeutral(0xFF282828), modifier = Modifier.padding(vertical = 12.dp))
                 Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
                     snap.dailyRules.forEach { r ->
@@ -2964,17 +2991,23 @@ private fun DayDetailCard(
                             )
                         }
                     }
-                    snap.weeklyDoneRules.forEach { w ->
+                }
+            }
+            if (snap.weeklyEntries.isNotEmpty()) {
+                HorizontalDivider(color = npNeutral(0xFF282828), modifier = Modifier.padding(vertical = 12.dp))
+                val german = npLocale().language == "de"
+                Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                    snap.weeklyEntries.forEach { goal ->
+                        val status = when {
+                            goal.paused -> if (german) "Pausiert" else "Skipped"
+                            goal.checked -> "\u2713  ${goal.count}/${goal.target}"
+                            else -> "${goal.count}/${goal.target}"
+                        }
                         Row(verticalAlignment = Alignment.CenterVertically) {
-                            Box(Modifier.size(7.dp).background(Red, CircleShape))
+                            Box(Modifier.size(7.dp).background(if (goal.checked) Red else npNeutral(0xFF333333), CircleShape))
                             Spacer(Modifier.width(10.dp))
-                            Text(
-                                if (w.optional) npString(R.string.np_1ecdf65a05c3 , w.name) else npString(R.string.np_0164e250ee12 , w.name),
-                                color = White,
-                                fontSize = 13.sp,
-                                modifier = Modifier.weight(1f)
-                            )
-                            Text("✓", color = Red, fontFamily = FontFamily.Default, fontSize = 12.sp)
+                            Text(goal.name, color = White, fontSize = 13.sp, modifier = Modifier.weight(1f))
+                            Text(status, color = if (goal.checked) Red else Muted, fontSize = 12.sp)
                         }
                     }
                 }
@@ -6590,25 +6623,23 @@ private fun SetupScreen(
         }
     }
 
-    Screen(ndot, npString(R.string.np_b0bae95080a9), npString(R.string.np_5fbb9f0b064b), npString(R.string.np_b86312ffdb86)) {
+    Screen(ndot, npString(R.string.np_b0bae95080a9), npString(R.string.np_5fbb9f0b064b),
+        npString(R.string.np_b86312ffdb86), headerGap = 8.dp) {
         Row(
-            Modifier.fillMaxWidth().padding(top = 26.dp, bottom = 4.dp),
+            Modifier.fillMaxWidth().padding(bottom = 6.dp),
             verticalAlignment = Alignment.CenterVertically,
             horizontalArrangement = Arrangement.SpaceBetween
         ) {
             Text(npString(R.string.np_2af464a2d2d7), color = Muted, fontFamily = FontFamily.Default, fontSize = 10.sp, letterSpacing = 1.7.sp)
-            TextButton(onClick = npHapticClick(onAdd)) {
-                Text(npString(R.string.np_06df2fea07b8), color = White, fontFamily = FontFamily.Default, fontSize = 11.sp, letterSpacing = 1.7.sp)
+            val addLabel = if (npLocale().language == "de") "Aufgabe hinzuf\u00fcgen" else "Add task"
+            IconButton(
+                onClick = npHapticClick(onAdd),
+                modifier = Modifier.size(48.dp).semantics { contentDescription = addLabel }
+            ) {
+                Box(Modifier.size(36.dp).background(White, CircleShape), contentAlignment = Alignment.Center) {
+                    WeeklyStepGlyph(Bg, plus = true)
+                }
             }
-        }
-
-        if (rules.size > 1) {
-            Text(
-                npString(R.string.np_3839958189dd),
-                color = Muted,
-                fontSize = 11.sp,
-                modifier = Modifier.padding(start = 6.dp, end = 6.dp, bottom = 10.dp)
-            )
         }
 
         if (rules.isEmpty()) {
@@ -6713,6 +6744,15 @@ private fun SetupScreen(
                     }
                 }
             }
+        }
+
+        if (rules.size > 1) {
+            Text(
+                npString(R.string.np_3839958189dd),
+                color = Muted,
+                fontSize = 11.sp,
+                modifier = Modifier.padding(start = 6.dp, end = 6.dp, top = 6.dp)
+            )
         }
 
         SectionLabel(npString(R.string.np_b8331e795763), topPadding = 24.dp, bottomPadding = 10.dp)
