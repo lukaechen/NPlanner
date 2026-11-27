@@ -111,8 +111,17 @@ object NPlannerDriveBackup {
             val out=File(target,entry.name);require(out.canonicalPath.startsWith(target.canonicalPath));if(!entry.isDirectory){out.parentFile?.mkdirs();out.outputStream().use{zin.copyTo(it)}};entry=zin.nextEntry}}
         val db=File(target,DB_NAME);require(db.isFile&&db.length()>0){"Backup enthält keine gültige Datenbank"}
         File(context.filesDir,"pending-nplanner-restore.db").also{db.copyTo(it,true)}
-        val prefsDir=File(target,"shared_prefs");if(prefsDir.isDirectory) prefsDir.copyRecursively(File(context.filesDir,"pending-shared-prefs"),true)
-        zip.delete()
+        val prefsDir = File(target, "shared_prefs")
+		if (prefsDir.isDirectory) {
+			prefsDir.copyRecursively(
+				File(context.filesDir, "pending-shared-prefs"),
+				overwrite = true
+			)
+		}
+
+		zip.delete()
+
+		Unit
     }}
     fun applyPendingRestore(context:Context):Boolean{
         val pending=File(context.filesDir,"pending-nplanner-restore.db");if(!pending.exists())return false
