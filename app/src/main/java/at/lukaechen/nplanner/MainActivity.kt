@@ -114,7 +114,7 @@ private val White get() = NPlannerAppearance.palette.foreground
 private val Muted get() = NPlannerAppearance.palette.muted
 private val Red get() = NPlannerAppearance.palette.accent
 
-private const val NPLANNER_VERSION = "0.51"
+private const val NPLANNER_VERSION = "0.52"
 
 /** FIXED = feste Uhrzeit, INTERVAL = Zeitabstand mit Von/Bis, ALLDAY = ohne Zeit, WEEKLY = Flexibles Wochenziel (1..14x pro Woche). */
 enum class RuleKind { FIXED, INTERVAL, ALLDAY, ONE_TIME, WEEKLY }
@@ -1666,10 +1666,13 @@ private fun TodayScreen(
         Spacer(Modifier.height(if (orbit) 4.dp else 8.dp))
         Column(Modifier.weight(1f).verticalScroll(rememberScrollState())) {
             if (doneToday == totalToday) {
-                key(completionAnimationKey) {
-                    DayCompleteCelebration(ndot, orbit,
-                        npString(R.string.np_5fdacf19cdc6),
-                        npString(R.string.np_eef51c581083))
+                AnimatedContent(targetState = completionAnimationKey, label = "day_complete_text") {
+                    Column(Modifier.fillMaxWidth().padding(top = if (orbit) 10.dp else 18.dp),
+                        horizontalAlignment = Alignment.CenterHorizontally) {
+                        DisplayTitle(npString(R.string.np_5fdacf19cdc6), ndot, fontSize = 28.sp)
+                        Text(npString(R.string.np_eef51c581083), color = Muted, fontSize = 13.sp,
+                            textAlign = TextAlign.Center, modifier = Modifier.padding(top = 6.dp, bottom = 8.dp))
+                    }
                 }
             } else if (mandatoryDaily.isNotEmpty()) {
                 SectionLabel(
@@ -1762,21 +1765,57 @@ private fun ProgressBars(done: Int, total: Int, ndot: FontFamily) {
     val animatedDone by animateFloatAsState(targetValue = done.toFloat(),
         animationSpec = spring(dampingRatio = Spring.DampingRatioNoBouncy, stiffness = Spring.StiffnessLow),
         label = "bar_progress")
+    val completed = total > 0 && done >= total
+    val pulse = remember { Animatable(0f) }
+    LaunchedEffect(completed) {
+        if (completed) {
+            pulse.snapTo(0f)
+            pulse.animateTo(1f, tween(620, easing = FastOutSlowInEasing))
+        }
+    }
     Column(Modifier.fillMaxWidth()) {
         Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.Bottom,
             horizontalArrangement = Arrangement.SpaceBetween) {
             DisplayCount(done, total, ndot, 84.sp)
-            Text(if (done == total) npString(R.string.np_595b69683dcf) else npString(R.string.np_71f43d0f0475),
+            Text(if (completed) npString(R.string.np_595b69683dcf) else npString(R.string.np_71f43d0f0475),
                 color = Muted, fontFamily = FontFamily.Default, fontSize = 10.sp, letterSpacing = 2.sp,
                 modifier = Modifier.padding(bottom = 6.dp))
         }
         Spacer(Modifier.height(18.dp))
-        Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(if (total > 10) 3.dp else 6.dp)) {
-            repeat(total.coerceAtLeast(1)) { i ->
-                val fill = if (total == 0) 1f else (animatedDone - i).coerceIn(0f, 1f)
-                Box(Modifier.weight(1f).height(10.dp).clip(RoundedCornerShape(5.dp))
-                    .background(npNeutral(0xFF2A2A2A))) {
-                    Box(Modifier.fillMaxHeight().fillMaxWidth(fill).background(White, RoundedCornerShape(5.dp)))
+        Box(Modifier.fillMaxWidth().height(30.dp), contentAlignment = Alignment.Center) {
+            Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(if (total > 10) 3.dp else 6.dp)) {
+                repeat(total.coerceAtLeast(1)) { i ->
+                    val fill = if (total == 0) 1f else (animatedDone - i).coerceIn(0f, 1f)
+                    Box(Modifier.weight(1f).height(10.dp).clip(RoundedCornerShape(5.dp))
+                        .background(npNeutral(0xFF2A2A2A))) {
+                        Box(Modifier.fillMaxHeight().fillMaxWidth(fill).background(White, RoundedCornerShape(5.dp)))
+                    }
+                }
+            }
+            if (completed && pulse.value < 1f) {
+                Canvas(Modifier.fillMaxSize()) {
+                    val p = pulse.value
+                    val x = size.width * p
+                    drawRoundRect(
+                        color = Red.copy(alpha = (1f - p) * .75f),
+                        topLeft = Offset((x - 22.dp.toPx()).coerceAtLeast(0f), size.height/2f - 6.dp.toPx()),
+                        size = Size(44.dp.toPx(), 12.dp.toPx()),
+                        cornerRadius = CornerRadius(6.dp.toPx())
+                    )
+                    val seed = listOf(.12f,.25f,.40f,.57f,.73f,.88f)
+                    seed.forEachIndexed { idx, f ->
+                        val local = ((p - f) * 4f).coerceIn(0f,1f)
+                        if (local > 0f && local < 1f) {
+                            val px = size.width*f
+                            val dir = if (idx % 2 == 0) -1f else 1f
+                            drawCircle(
+                                color = if (idx % 3 == 0) Red else White,
+                                radius = (2.2f - local).coerceAtLeast(.7f).dp.toPx(),
+                                center = Offset(px + dir*local*12.dp.toPx(), size.height/2f + dir*local*10.dp.toPx()),
+                                alpha = 1f-local
+                            )
+                        }
+                    }
                 }
             }
         }
@@ -1794,6 +1833,14 @@ private fun ProgressOrbit(
     countFontSize: TextUnit = 38.sp,
     segmented: Boolean = true
 ) {
+    val complete = total > 0 && done >= total
+    val celebration = remember { Animatable(1f) }
+    LaunchedEffect(complete) {
+        if (complete) {
+            celebration.snapTo(0f)
+            celebration.animateTo(1f, tween(900, easing = FastOutSlowInEasing))
+        }
+    }
     Box(Modifier.fillMaxWidth().height(boxHeight), contentAlignment = Alignment.Center) {
         Canvas(Modifier.size(ringSize)) {
             val stroke = strokeWidth.toPx()
@@ -1834,15 +1881,35 @@ private fun ProgressOrbit(
                 )
             }
         }
-        Column(horizontalAlignment = Alignment.CenterHorizontally) {
-            DisplayCount(done, total, ndot, countFontSize)
-            Text(
-                if (done == total) npString(R.string.np_595b69683dcf) else npString(R.string.np_71f43d0f0475),
-                color = Muted,
-                fontFamily = FontFamily.Default,
-                fontSize = 9.sp,
-                letterSpacing = 2.sp
-            )
+        if (complete && celebration.value < .74f) {
+            val pop = (celebration.value / .28f).coerceIn(0f,1f)
+            Canvas(Modifier.size(ringSize)) {
+                val center = Offset(size.width/2f,size.height/2f)
+                val scale = 0.75f + .25f * kotlin.math.sin(pop * Math.PI.toFloat()/2f)
+                val c = Path().apply {
+                    moveTo(center.x-size.width*.13f*scale, center.y)
+                    lineTo(center.x-size.width*.025f*scale, center.y+size.height*.105f*scale)
+                    lineTo(center.x+size.width*.17f*scale, center.y-size.height*.13f*scale)
+                }
+                drawPath(c, White, style=Stroke(5.dp.toPx(), cap=StrokeCap.Round, join=StrokeJoin.Round))
+                val burst=((celebration.value-.12f)/.48f).coerceIn(0f,1f)
+                repeat(12) { i ->
+                    val a=(i*30.0-90.0)*Math.PI/180.0
+                    val r=size.minDimension*(.24f+.23f*burst)
+                    val x=center.x+kotlin.math.cos(a).toFloat()*r
+                    val y=center.y+kotlin.math.sin(a).toFloat()*r
+                    val len=(5f+if(i%3==0)5f else 0f).dp.toPx()*(1f-burst*.35f)
+                    val dx=kotlin.math.cos(a).toFloat()*len; val dy=kotlin.math.sin(a).toFloat()*len
+                    drawLine(if(i%4==0) Red else White,Offset(x-dx/2,y-dy/2),Offset(x+dx/2,y+dy/2),
+                        if(i%3==0) 2.5.dp.toPx() else 1.7.dp.toPx(),StrokeCap.Round,alpha=1f-burst)
+                }
+            }
+        } else {
+            Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                DisplayCount(done, total, ndot, countFontSize)
+                Text(if (complete) npString(R.string.np_595b69683dcf) else npString(R.string.np_71f43d0f0475),
+                    color = Muted, fontFamily = FontFamily.Default, fontSize = 9.sp, letterSpacing = 2.sp)
+            }
         }
     }
 }
@@ -6075,9 +6142,10 @@ private fun GlyphNav(
     Surface(
         modifier = modifier
             .navigationBarsPadding()
-            .padding(horizontal = 18.dp, vertical = 14.dp)
+            .padding(horizontal = 38.dp, vertical = 14.dp)
+            .widthIn(max = 330.dp)
             .fillMaxWidth()
-            .height(64.dp),
+            .height(62.dp),
         color = npNeutral(0xE6252525),
         shape = RoundedCornerShape(34.dp),
         shadowElevation = 14.dp
