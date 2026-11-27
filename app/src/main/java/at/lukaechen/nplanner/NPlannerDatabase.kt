@@ -94,6 +94,7 @@ abstract class NPlannerDatabase: RoomDatabase() {
             instance ?: Room.databaseBuilder(context.applicationContext,NPlannerDatabase::class.java,"nplanner_room_v1.db")
                 .allowMainThreadQueries().build().also{instance=it}
         }
+        fun closeInstance() = synchronized(this) { instance?.close(); instance = null }
     }
 }
 
@@ -149,7 +150,14 @@ class NPlannerPreferences private constructor(private val dao: NPlannerDao): Sha
     private fun writeSets(raw:String){val a=runCatching{JSONArray(raw)}.getOrElse{JSONArray()};dao.replaceSets((0 until a.length()).mapNotNull{i->val o=a.optJSONObject(i)?:return@mapNotNull null;val id=o.optString("id");if(id.isBlank())null else DbExerciseSet(id,o.optString("exerciseId"),o.optString("date"),o.optDouble("weightKg"),o.optInt("reps"),o.optInt("seconds"),o.optString("workoutId"),o.optDouble("distanceKm"),o.optString("sessionId"))})}
     private fun setsJson()=JSONArray().also{a->dao.sets().forEach{s->a.put(JSONObject().put("id",s.id).put("exerciseId",s.exerciseId).put("date",s.date).put("weightKg",s.weightKg).put("reps",s.reps).put("seconds",s.seconds).put("workoutId",s.workoutId).put("distanceKm",s.distanceKm).put("sessionId",s.sessionId))}}.toString()
 
-    companion object{@Volatile private var instance:NPlannerPreferences?=null;fun get(context:Context)=instance?:synchronized(this){instance?:NPlannerPreferences(NPlannerDatabase.get(context).dao()).also{instance=it}}}
+    companion object{
+        @Volatile private var instance:NPlannerPreferences?=null
+        fun get(context:Context)=instance?:synchronized(this){instance?:NPlannerPreferences(NPlannerDatabase.get(context).dao()).also{instance=it}}
+        fun reset() = synchronized(this) { instance = null }
+    }
 }
 
-object NPlannerStore { fun get(context:Context):SharedPreferences=NPlannerPreferences.get(context) }
+object NPlannerStore {
+    fun get(context:Context):SharedPreferences=NPlannerPreferences.get(context)
+    fun reset()=NPlannerPreferences.reset()
+}
