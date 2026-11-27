@@ -166,7 +166,7 @@
     <string name="np_694aa76eb977" formatted="false">"+ New"</string>
     <string name="np_696c877954da" formatted="false">"Target repetitions"</string>
     <string name="np_69830ab7e0a9" formatted="false">"COMPLETE ROUNDS"</string>
-    <string name="np_69a89741235d" formatted="false">"NPLANNER · VERSION 0.43"</string>
+    <string name="np_69a89741235d" formatted="false">"NPLANNER · VERSION %1$s"</string>
     <string name="np_6a1cae58339e" formatted="false">"Records"</string>
     <string name="np_6a2fce0e54c0" formatted="false">"No suitable video app found."</string>
     <string name="np_6a559f764035" formatted="false">"Full body"</string>
