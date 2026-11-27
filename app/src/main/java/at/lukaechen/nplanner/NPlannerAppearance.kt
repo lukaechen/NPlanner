@@ -57,6 +57,21 @@ internal object NPlannerAppearance {
         val next = if (dark) darkPalette else lightPalette
         if (palette != next) palette = next
     }
+    suspend fun animatePalette(dark: Boolean) {
+        val from = palette
+        val to = if (dark) darkPalette else lightPalette
+        if (from == to) return
+        androidx.compose.animation.core.Animatable(0f).animateTo(
+            1f, androidx.compose.animation.core.tween(320)
+        ) {
+            fun blend(a: Color, b: Color) = androidx.compose.ui.graphics.lerp(a, b, value)
+            palette = NPlannerPalette(dark,
+                blend(from.background, to.background), blend(from.panel, to.panel),
+                blend(from.panel2, to.panel2), blend(from.foreground, to.foreground),
+                blend(from.muted, to.muted), blend(from.accent, to.accent))
+        }
+        palette = to
+    }
     fun updateMode(value: String) {
         if (value !in listOf("auto", "light", "dark")) return
         context.getSharedPreferences("nplanner-v2", Context.MODE_PRIVATE).edit().putString("appearance_mode_v43", value).apply()
