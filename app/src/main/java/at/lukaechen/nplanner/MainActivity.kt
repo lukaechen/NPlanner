@@ -132,7 +132,7 @@ private val White get() = NPlannerAppearance.palette.foreground
 private val Muted get() = NPlannerAppearance.palette.muted
 private val Red get() = NPlannerAppearance.palette.accent
 
-private const val NPLANNER_VERSION = "0.64"
+private const val NPLANNER_VERSION = "0.65"
 private const val WINTER_SNOW_KEY = "winter_snow_mode"
 
 private enum class WinterSnowMode {
@@ -6716,12 +6716,12 @@ private fun WinterSnowOverlay(glyphStyle: Boolean, modifier: Modifier = Modifier
     )
     val ink = White
     val darkBackground = Bg.luminance() < .5f
-    val bandHeight = with(LocalDensity.current) { WindowInsets.statusBars.getTop(this).toDp() } + 98.dp
+    val bandHeight = with(LocalDensity.current) { WindowInsets.statusBars.getTop(this).toDp() } + 140.dp
     Canvas(modifier.fillMaxWidth().height(bandHeight).clipToBounds()) {
         val elapsed = time.value
         val margin = 12.dp.toPx()
         val usableWidth = (size.width - margin * 2f).coerceAtLeast(0f)
-        for (index in 0 until 9) {
+        for (index in 0 until 13) {
             val duration = when (index % 4) { 0 -> 12f; 1 -> 15f; 2 -> 20f; else -> 24f }
             val fall = (elapsed / duration + (index * .381966f) % 1f) % 1f
             val fade = minOf(fall / .15f, (1f - fall) / .30f, 1f)
