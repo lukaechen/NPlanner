@@ -114,7 +114,7 @@ private val White get() = NPlannerAppearance.palette.foreground
 private val Muted get() = NPlannerAppearance.palette.muted
 private val Red get() = NPlannerAppearance.palette.accent
 
-private const val NPLANNER_VERSION = "0.50"
+private const val NPLANNER_VERSION = "0.51"
 
 /** FIXED = feste Uhrzeit, INTERVAL = Zeitabstand mit Von/Bis, ALLDAY = ohne Zeit, WEEKLY = Flexibles Wochenziel (1..14x pro Woche). */
 enum class RuleKind { FIXED, INTERVAL, ALLDAY, ONE_TIME, WEEKLY }
@@ -1517,20 +1517,34 @@ private fun DisplayTitle(
 @Composable
 private fun DisplayCount(done: Int, total: Int, ndot: FontFamily, fontSize: TextUnit) {
     val useDot = LocalDotHeadings.current
-    Text(
-        text = buildAnnotatedString {
-            append("${done}")
-            withStyle(SpanStyle(color = npNeutral(0xFF5A5A5A))) { append("/${total}") }
-        },
-        color = White,
-        fontFamily = if (useDot) ndot else LocalClassicHeadings.current,
-        fontWeight = if (useDot) FontWeight.Normal else FontWeight.Light,
-        fontSize = fontSize,
-        lineHeight = fontSize,
-        letterSpacing = if (useDot) 1.sp else (-0.8).sp
-    )
+    val family = if (useDot) ndot else LocalClassicHeadings.current
+    val weight = if (useDot) FontWeight.Normal else FontWeight.Light
+    val spacing = if (useDot) 1.sp else (-0.8).sp
+    val digitSlots = maxOf(1, total.toString().length, done.toString().length)
+    val numberWidth = (fontSize.value * 0.64f * digitSlots).dp
+    val slashWidth = (fontSize.value * 0.42f).dp
+    Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.Center) {
+        Box(Modifier.width(numberWidth), contentAlignment = Alignment.CenterEnd) {
+            Text(done.toString(), color = White, fontFamily = family, fontWeight = weight,
+                fontSize = fontSize, lineHeight = fontSize, letterSpacing = spacing,
+                maxLines = 1, softWrap = false, style = TextStyle(fontFeatureSettings = "tnum",
+                    platformStyle = PlatformTextStyle(includeFontPadding = false)))
+        }
+        Box(Modifier.width(slashWidth), contentAlignment = Alignment.Center) {
+            Text("/", color = npNeutral(0xFF5A5A5A), fontFamily = family, fontWeight = weight,
+                fontSize = fontSize, lineHeight = fontSize, maxLines = 1,
+                style = TextStyle(fontFeatureSettings = "tnum",
+                    platformStyle = PlatformTextStyle(includeFontPadding = false)))
+        }
+        Box(Modifier.width(numberWidth), contentAlignment = Alignment.CenterStart) {
+            Text(total.toString(), color = npNeutral(0xFF5A5A5A), fontFamily = family,
+                fontWeight = weight, fontSize = fontSize, lineHeight = fontSize,
+                letterSpacing = spacing, maxLines = 1, softWrap = false,
+                style = TextStyle(fontFeatureSettings = "tnum",
+                    platformStyle = PlatformTextStyle(includeFontPadding = false)))
+        }
+    }
 }
-
 @Composable
 private fun Screen(
     ndot: FontFamily,
@@ -1594,9 +1608,17 @@ private fun TodayScreen(
     val doneToday = dailyDone + weeklyDoneToday
     val progress by animateFloatAsState(
         targetValue = if (totalToday == 0) 1f else doneToday.toFloat() / totalToday,
+        animationSpec = spring(dampingRatio = Spring.DampingRatioNoBouncy, stiffness = Spring.StiffnessLow),
         label = "progress"
     )
     val open = totalToday - doneToday
+    var completionAnimationKey by remember { mutableIntStateOf(0) }
+    var wasComplete by remember { mutableStateOf(false) }
+    LaunchedEffect(doneToday, totalToday) {
+        val complete = totalToday > 0 && doneToday >= totalToday
+        if (complete && !wasComplete) completionAnimationKey++
+        wasComplete = complete
+    }
     val next = remember(mandatoryDaily, date, tick, nowMin) {
         mandatoryDaily
             .filter { count(it) < totalOf(it) }
@@ -1644,18 +1666,11 @@ private fun TodayScreen(
         Spacer(Modifier.height(if (orbit) 4.dp else 8.dp))
         Column(Modifier.weight(1f).verticalScroll(rememberScrollState())) {
             if (doneToday == totalToday) {
-                DisplayTitle(
-                    npString(R.string.np_5fdacf19cdc6),
-                    ndot,
-                    Modifier.align(Alignment.CenterHorizontally).padding(top = if (orbit) 10.dp else 18.dp),
-                    28.sp
-                )
-                Text(
-                    npString(R.string.np_eef51c581083),
-                    color = Muted,
-                    fontSize = 13.sp,
-                    modifier = Modifier.align(Alignment.CenterHorizontally).padding(top = 6.dp, bottom = 8.dp)
-                )
+                key(completionAnimationKey) {
+                    DayCompleteCelebration(ndot, orbit,
+                        npString(R.string.np_5fdacf19cdc6),
+                        npString(R.string.np_eef51c581083))
+                }
             } else if (mandatoryDaily.isNotEmpty()) {
                 SectionLabel(
                     npString(R.string.np_c710983cc05f),
@@ -1744,37 +1759,29 @@ private fun TodayScreen(
 
 @Composable
 private fun ProgressBars(done: Int, total: Int, ndot: FontFamily) {
+    val animatedDone by animateFloatAsState(targetValue = done.toFloat(),
+        animationSpec = spring(dampingRatio = Spring.DampingRatioNoBouncy, stiffness = Spring.StiffnessLow),
+        label = "bar_progress")
     Column(Modifier.fillMaxWidth()) {
-        Row(
-            Modifier.fillMaxWidth(),
-            verticalAlignment = Alignment.Bottom,
-            horizontalArrangement = Arrangement.SpaceBetween
-        ) {
+        Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.Bottom,
+            horizontalArrangement = Arrangement.SpaceBetween) {
             DisplayCount(done, total, ndot, 84.sp)
-            Text(
-                if (done == total) npString(R.string.np_595b69683dcf) else npString(R.string.np_71f43d0f0475),
-                color = Muted,
-                fontFamily = FontFamily.Default,
-                fontSize = 10.sp,
-                letterSpacing = 2.sp,
-                modifier = Modifier.padding(bottom = 6.dp)
-            )
+            Text(if (done == total) npString(R.string.np_595b69683dcf) else npString(R.string.np_71f43d0f0475),
+                color = Muted, fontFamily = FontFamily.Default, fontSize = 10.sp, letterSpacing = 2.sp,
+                modifier = Modifier.padding(bottom = 6.dp))
         }
         Spacer(Modifier.height(18.dp))
         Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(if (total > 10) 3.dp else 6.dp)) {
             repeat(total.coerceAtLeast(1)) { i ->
-                Box(
-                    Modifier
-                        .weight(1f)
-                        .height(10.dp)
-                        .clip(RoundedCornerShape(5.dp))
-                        .background(if (total == 0 || i < done) White else npNeutral(0xFF2A2A2A))
-                )
+                val fill = if (total == 0) 1f else (animatedDone - i).coerceIn(0f, 1f)
+                Box(Modifier.weight(1f).height(10.dp).clip(RoundedCornerShape(5.dp))
+                    .background(npNeutral(0xFF2A2A2A))) {
+                    Box(Modifier.fillMaxHeight().fillMaxWidth(fill).background(White, RoundedCornerShape(5.dp)))
+                }
             }
         }
     }
 }
-
 @Composable
 private fun ProgressOrbit(
     progress: Float,
@@ -1797,17 +1804,14 @@ private fun ProgressOrbit(
                 val stepDeg = 360f / total
                 val sweepDeg = (stepDeg - gapDeg).coerceAtLeast(3f)
                 val startBase = -90f + gapDeg / 2f
+                val animatedSegments = progress.coerceIn(0f, 1f) * total
                 repeat(total) { i ->
                     val segStart = startBase + i * stepDeg
-                    drawArc(
-                        color = if (i < done) White else npNeutral(0xFF2A2A2A),
-                        startAngle = segStart,
-                        sweepAngle = sweepDeg,
-                        useCenter = false,
-                        topLeft = Offset(inset, inset),
-                        size = arcSize,
-                        style = Stroke(stroke, cap = StrokeCap.Round)
-                    )
+                    drawArc(npNeutral(0xFF2A2A2A), segStart, sweepDeg, false,
+                        Offset(inset, inset), arcSize, style = Stroke(stroke, cap = StrokeCap.Round))
+                    val fill = (animatedSegments - i).coerceIn(0f, 1f)
+                    if (fill > 0f) drawArc(White, segStart, sweepDeg * fill, false,
+                        Offset(inset, inset), arcSize, style = Stroke(stroke, cap = StrokeCap.Round))
                 }
             } else {
                 drawArc(
@@ -1839,6 +1843,46 @@ private fun ProgressOrbit(
                 fontSize = 9.sp,
                 letterSpacing = 2.sp
             )
+        }
+    }
+}
+
+@Composable
+private fun DayCompleteCelebration(ndot: FontFamily, compact: Boolean, title: String, subtitle: String) {
+    val ring = remember { Animatable(0f) }
+    val check = remember { Animatable(0f) }
+    val content = remember { Animatable(0f) }
+    LaunchedEffect(Unit) {
+        ring.animateTo(1f, tween(420, easing = FastOutSlowInEasing))
+        check.animateTo(1f, spring(dampingRatio = Spring.DampingRatioMediumBouncy, stiffness = Spring.StiffnessLow))
+        content.animateTo(1f, tween(280, easing = FastOutSlowInEasing))
+    }
+    Column(Modifier.fillMaxWidth().padding(top = if (compact) 8.dp else 16.dp),
+        horizontalAlignment = Alignment.CenterHorizontally) {
+        Box(Modifier.size(if (compact) 74.dp else 86.dp), contentAlignment = Alignment.Center) {
+            Canvas(Modifier.fillMaxSize()) {
+                val center = Offset(size.width / 2f, size.height / 2f)
+                val radius = size.minDimension * 0.48f
+                drawCircle(Red.copy(alpha = (1f - ring.value) * .22f), radius * ring.value,
+                    center, style = Stroke(2.dp.toPx()))
+                drawCircle(White, radius * .58f * check.value.coerceAtLeast(.01f), center,
+                    style = Stroke(3.dp.toPx(), cap = StrokeCap.Round))
+                if (check.value > .25f) {
+                    val local = ((check.value - .25f) / .75f).coerceIn(0f, 1f)
+                    val p1 = Offset(size.width*.34f,size.height*.51f)
+                    val p2 = Offset(size.width*.46f,size.height*.63f)
+                    val p3 = Offset(size.width*.69f,size.height*.37f)
+                    if (local <= .38f) drawLine(White,p1,Offset(p1.x+(p2.x-p1.x)*(local/.38f),p1.y+(p2.y-p1.y)*(local/.38f)),3.dp.toPx(),StrokeCap.Round)
+                    else { drawLine(White,p1,p2,3.dp.toPx(),StrokeCap.Round); val second=(local-.38f)/.62f
+                        drawLine(White,p2,Offset(p2.x+(p3.x-p2.x)*second,p2.y+(p3.y-p2.y)*second),3.dp.toPx(),StrokeCap.Round) }
+                }
+            }
+        }
+        Column(Modifier.graphicsLayer { alpha=content.value; translationY=(1f-content.value)*14.dp.toPx() },
+            horizontalAlignment = Alignment.CenterHorizontally) {
+            DisplayTitle(title, ndot, fontSize = 28.sp)
+            Text(subtitle, color = Muted, fontSize = 13.sp, textAlign = TextAlign.Center,
+                modifier = Modifier.padding(top = 6.dp, bottom = 8.dp))
         }
     }
 }
@@ -6440,10 +6484,6 @@ private fun SetupScreen(
         Spacer(Modifier.height(16.dp))
         SectionLabel(npString(R.string.np_b8331e795763))
         NPlannerAppearanceSettings()
-        Spacer(Modifier.height(16.dp))
-        SectionLabel(if (npLocale().language == "de") "DATENSICHERUNG" else "BACKUP")
-        NPlannerDriveBackupSettings()
-        Spacer(Modifier.height(10.dp))
         Surface(color = Panel, shape = RoundedCornerShape(22.dp), modifier = Modifier.fillMaxWidth()) {
             Column(Modifier.padding(16.dp)) {
                 Text(npString(R.string.np_29db02be308f), fontSize = 16.sp, color = White, fontWeight = FontWeight.Medium)
@@ -6492,6 +6532,10 @@ private fun SetupScreen(
             }
         }
 
+        Spacer(Modifier.height(16.dp))
+        SectionLabel(if (npLocale().language == "de") "DATENSICHERUNG" else "BACKUP")
+        NPlannerDriveBackupSettings()
+        Spacer(Modifier.height(10.dp))
         SectionLabel(npString(R.string.np_9028b65aa0a5), topPadding = 22.dp, bottomPadding = 10.dp)
         Surface(
             color = Panel,
