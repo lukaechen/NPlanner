@@ -127,65 +127,70 @@ private fun AppearanceChoice(
 }
 
 @Composable
-internal fun NPlannerAppearanceSettings() {
+internal fun NPlannerColorModeSettings() {
     val palette = NPlannerAppearance.palette
-    Column(Modifier.fillMaxWidth(), verticalArrangement = Arrangement.spacedBy(10.dp)) {
-        Surface(
-            color = palette.panel,
-            shape = RoundedCornerShape(22.dp),
-            tonalElevation = 0.dp,
-            shadowElevation = 0.dp,
-            modifier = Modifier.fillMaxWidth()
-        ) {
-            Column(Modifier.padding(16.dp)) {
-                Text(npString(R.string.np_bb7394e2373e), color = palette.foreground,
-                    fontFamily = FontFamily.Default, fontWeight = FontWeight.Medium, fontSize = 16.sp)
-                Spacer(Modifier.height(4.dp))
-                Text(npString(R.string.np_dfd8aad6150a), color = palette.muted,
-                    fontFamily = FontFamily.Default, fontSize = 11.sp, lineHeight = 16.sp)
-                Spacer(Modifier.height(12.dp))
-                Row(
-                    Modifier.fillMaxWidth().selectableGroup(),
-                    horizontalArrangement = Arrangement.spacedBy(8.dp)
-                ) {
-                    listOf(
-                        "light" to npString(R.string.np_ed10fe113de1),
-                        "dark" to npString(R.string.np_ec4616f89869),
-                        "auto" to npString(R.string.np_c614ba7c453c)
-                    ).forEach { (value, label) ->
-                        AppearanceChoice(label, NPlannerAppearance.mode == value, Modifier.weight(1f)) {
-                            NPlannerAppearance.updateMode(value)
-                        }
-                    }
+    Surface(
+        color = palette.panel,
+        shape = RoundedCornerShape(22.dp),
+        tonalElevation = 0.dp,
+        shadowElevation = 0.dp,
+        modifier = Modifier.fillMaxWidth()
+    ) {
+        Column(Modifier.padding(16.dp)) {
+            Text(npString(R.string.np_bb7394e2373e), color = palette.foreground,
+                fontFamily = FontFamily.Default, fontWeight = FontWeight.Medium, fontSize = 16.sp)
+            Spacer(Modifier.height(4.dp))
+            Text(npString(R.string.np_dfd8aad6150a), color = palette.muted,
+                fontFamily = FontFamily.Default, fontSize = 11.sp, lineHeight = 16.sp)
+            Spacer(Modifier.height(12.dp))
+            Row(
+                Modifier.fillMaxWidth().selectableGroup(),
+                horizontalArrangement = Arrangement.spacedBy(8.dp)
+            ) {
+                listOf(
+                    "light" to npString(R.string.np_ed10fe113de1),
+                    "dark" to npString(R.string.np_ec4616f89869),
+                    "auto" to npString(R.string.np_c614ba7c453c)
+                ).forEach { (value, label) ->
+                    val selected = NPlannerAppearance.mode == value
+                    AppearanceChoice(label, selected, Modifier.weight(1f),
+                        onClick = if (selected) { {} } else npHapticClick { NPlannerAppearance.updateMode(value) }
+                    )
                 }
             }
         }
-        Surface(
-            color = palette.panel,
-            shape = RoundedCornerShape(22.dp),
-            tonalElevation = 0.dp,
-            shadowElevation = 0.dp,
-            modifier = Modifier.fillMaxWidth()
-        ) {
-            Column(Modifier.padding(16.dp)) {
-                Text(npString(R.string.np_b28f6f150a0f), color = palette.foreground,
-                    fontFamily = FontFamily.Default, fontWeight = FontWeight.Medium, fontSize = 16.sp)
-                Spacer(Modifier.height(4.dp))
-                Text(npString(R.string.np_834bc9df07a7), color = palette.muted,
-                    fontFamily = FontFamily.Default, fontSize = 11.sp, lineHeight = 16.sp)
-                Spacer(Modifier.height(12.dp))
-                Row(
-                    Modifier.fillMaxWidth().selectableGroup(),
-                    horizontalArrangement = Arrangement.spacedBy(8.dp)
-                ) {
-                    listOf(
-                        "de" to npString(R.string.np_a6a7709266d3),
-                        "en" to npString(R.string.np_649df08a448e)
-                    ).forEach { (value, label) ->
-                        AppearanceChoice(label, NPlannerAppearance.language == value, Modifier.weight(1f)) {
-                            NPlannerAppearance.updateLanguage(value)
-                        }
-                    }
+    }
+}
+
+@Composable
+internal fun NPlannerLanguageSettings() {
+    val palette = NPlannerAppearance.palette
+    Surface(
+        color = palette.panel,
+        shape = RoundedCornerShape(22.dp),
+        tonalElevation = 0.dp,
+        shadowElevation = 0.dp,
+        modifier = Modifier.fillMaxWidth()
+    ) {
+        Column(Modifier.padding(16.dp)) {
+            Text(npString(R.string.np_b28f6f150a0f), color = palette.foreground,
+                fontFamily = FontFamily.Default, fontWeight = FontWeight.Medium, fontSize = 16.sp)
+            Spacer(Modifier.height(4.dp))
+            Text(npString(R.string.np_834bc9df07a7), color = palette.muted,
+                fontFamily = FontFamily.Default, fontSize = 11.sp, lineHeight = 16.sp)
+            Spacer(Modifier.height(12.dp))
+            Row(
+                Modifier.fillMaxWidth().selectableGroup(),
+                horizontalArrangement = Arrangement.spacedBy(8.dp)
+            ) {
+                listOf(
+                    "de" to npString(R.string.np_a6a7709266d3),
+                    "en" to npString(R.string.np_649df08a448e)
+                ).forEach { (value, label) ->
+                    val selected = NPlannerAppearance.language == value
+                    AppearanceChoice(label, selected, Modifier.weight(1f),
+                        onClick = if (selected) { {} } else npHapticClick { NPlannerAppearance.updateLanguage(value) }
+                    )
                 }
             }
         }
