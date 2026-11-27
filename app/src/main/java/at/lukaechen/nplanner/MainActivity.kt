@@ -856,6 +856,7 @@ class MainActivity : ComponentActivity() {
     }
 
     override fun onCreate(savedInstanceState: Bundle?) {
+        NPlannerDriveBackup.applyPendingRestore(this)
         super.onCreate(savedInstanceState)
         NPlannerAppearance.initialize(this)
         seedEditableWorkoutTemplates(this)
@@ -6437,6 +6438,9 @@ private fun SetupScreen(
         Spacer(Modifier.height(16.dp))
         SectionLabel(npString(R.string.np_b8331e795763))
         NPlannerAppearanceSettings()
+        Spacer(Modifier.height(16.dp))
+        SectionLabel(if (npLocale().language == "de") "DATENSICHERUNG" else "BACKUP")
+        NPlannerDriveBackupSettings()
         Spacer(Modifier.height(10.dp))
         Surface(color = Panel, shape = RoundedCornerShape(22.dp), modifier = Modifier.fillMaxWidth()) {
             Column(Modifier.padding(16.dp)) {
