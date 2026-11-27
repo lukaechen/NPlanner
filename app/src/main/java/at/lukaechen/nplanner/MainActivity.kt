@@ -20,6 +20,7 @@ import android.widget.MediaController
 import android.widget.Toast
 import android.widget.VideoView
 import androidx.activity.ComponentActivity
+import androidx.activity.enableEdgeToEdge
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.compose.setContent
 import androidx.activity.result.contract.ActivityResultContracts
@@ -114,7 +115,7 @@ private val White get() = NPlannerAppearance.palette.foreground
 private val Muted get() = NPlannerAppearance.palette.muted
 private val Red get() = NPlannerAppearance.palette.accent
 
-private const val NPLANNER_VERSION = "0.53"
+private const val NPLANNER_VERSION = "0.54"
 
 /** FIXED = feste Uhrzeit, INTERVAL = Zeitabstand mit Von/Bis, ALLDAY = ohne Zeit, WEEKLY = Flexibles Wochenziel (1..14x pro Woche). */
 enum class RuleKind { FIXED, INTERVAL, ALLDAY, ONE_TIME, WEEKLY }
@@ -342,63 +343,47 @@ private fun logSummary(ex: Exercise, log: ExerciseLog): String = when (ex.kind) 
 private fun weekStartKey(d: LocalDate): String =
     d.minusDays((d.dayOfWeek.value - 1).toLong()).toString()
 
-private fun triggerHaptic(
-    context: Context,
-    haptic: HapticFeedback,
-    style: HapticStyle
-) {
-    val vibratedViaSystem = runCatching {
-        val vibrator = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
-            (context.getSystemService(Context.VIBRATOR_MANAGER_SERVICE) as? VibratorManager)?.defaultVibrator
-        } else {
-            @Suppress("DEPRECATION")
-            context.getSystemService(Context.VIBRATOR_SERVICE) as? Vibrator
-        }
-        if (vibrator != null && vibrator.hasVibrator()) {
-            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
-                when (style) {
-                    HapticStyle.DAY_COMPLETE -> {
-                        val timings = longArrayOf(0L, 45L, 65L, 95L)
-                        val amplitudes = intArrayOf(0, 190, 0, 255)
-                        vibrator.vibrate(VibrationEffect.createWaveform(timings, amplitudes, -1))
-                    }
-                    HapticStyle.TASK_DONE -> {
-                        vibrator.vibrate(VibrationEffect.createOneShot(34L, 155))
-                    }
-                    HapticStyle.UNDO -> {
-                        val timings = longArrayOf(0L, 18L, 38L, 14L)
-                        val amplitudes = intArrayOf(0, 115, 0, 75)
-                        vibrator.vibrate(VibrationEffect.createWaveform(timings, amplitudes, -1))
-                    }
-                    HapticStyle.TICK -> {
-                        vibrator.vibrate(VibrationEffect.createOneShot(16L, 80))
-                    }
-                }
-            } else {
-                @Suppress("DEPRECATION")
-                when (style) {
-                    HapticStyle.DAY_COMPLETE -> vibrator.vibrate(longArrayOf(0L, 45L, 65L, 95L), -1)
-                    HapticStyle.TASK_DONE -> vibrator.vibrate(26L)
-                    HapticStyle.UNDO -> vibrator.vibrate(longArrayOf(0L, 18L, 38L, 14L), -1)
-                    HapticStyle.TICK -> vibrator.vibrate(12L)
-                }
-            }
-            true
-        } else {
-            false
-        }
-    }.getOrDefault(false)
-
-    if (!vibratedViaSystem) {
+private fun triggerHaptic(context: Context, haptic: HapticFeedback, style: HapticStyle) {
+    // Common actions use Android's action-based feedback so every tap is consistent and respects system settings.
+    if (style != HapticStyle.DAY_COMPLETE) {
         runCatching {
             haptic.performHapticFeedback(
                 when (style) {
-                    HapticStyle.DAY_COMPLETE -> HapticFeedbackType.LongPress
+                    HapticStyle.TASK_DONE -> HapticFeedbackType.LongPress
+                    HapticStyle.UNDO -> HapticFeedbackType.TextHandleMove
+                    HapticStyle.TICK -> HapticFeedbackType.TextHandleMove
                     else -> HapticFeedbackType.TextHandleMove
                 }
             )
         }
+        return
     }
+    // Day complete deliberately gets a richer, unmistakable finish pattern.
+    val vibrator = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
+        (context.getSystemService(Context.VIBRATOR_MANAGER_SERVICE) as? VibratorManager)?.defaultVibrator
+    } else {
+        @Suppress("DEPRECATION") context.getSystemService(Context.VIBRATOR_SERVICE) as? Vibrator
+    }
+    val played = runCatching {
+        if (vibrator == null || !vibrator.hasVibrator()) false else {
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
+                val effect = VibrationEffect.startComposition()
+                    .addPrimitive(VibrationEffect.Composition.PRIMITIVE_TICK, .65f)
+                    .addPrimitive(VibrationEffect.Composition.PRIMITIVE_CLICK, .90f, 55)
+                    .addPrimitive(VibrationEffect.Composition.PRIMITIVE_THUD, 1.0f, 85)
+                    .compose()
+                vibrator.vibrate(effect)
+            } else if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+                vibrator.vibrate(VibrationEffect.createWaveform(
+                    longArrayOf(0L, 24L, 42L, 38L, 54L, 75L),
+                    intArrayOf(0, 105, 0, 175, 0, 255), -1))
+            } else {
+                @Suppress("DEPRECATION") vibrator.vibrate(longArrayOf(0L, 28L, 45L, 42L, 60L, 80L), -1)
+            }
+            true
+        }
+    }.getOrDefault(false)
+    if (!played) runCatching { haptic.performHapticFeedback(HapticFeedbackType.LongPress) }
 }
 
 // ---------- NPlanner Exercise JSON Format (NPEF-1) & KI-Prompt ----------
@@ -860,6 +845,8 @@ class MainActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         NPlannerDriveBackup.applyPendingRestore(this)
         super.onCreate(savedInstanceState)
+        enableEdgeToEdge()
+        window.isNavigationBarContrastEnforced = false
         NPlannerAppearance.initialize(this)
         seedEditableWorkoutTemplates(this)
         // Room is now the primary and only user-data store.
@@ -1784,20 +1771,21 @@ private fun ProgressBars(done: Int, total: Int, ndot: FontFamily) {
             Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(if (total > 10) 3.dp else 6.dp)) {
                 repeat(total.coerceAtLeast(1)) { i ->
                     val fill = if (total == 0) 1f else (animatedDone - i).coerceIn(0f,1f)
-                    val wave = if (completed) ((finish.value * (total + 2)) - i).coerceIn(0f,1f) else 0f
-                    Box(Modifier.weight(1f).height((10 + wave * 6).dp).clip(RoundedCornerShape(8.dp))
+                    val waveHead = if (completed) finish.value * total.coerceAtLeast(1) else -1f
+                    val wave = (1f - kotlin.math.abs(waveHead - (i + .5f)) * 1.35f).coerceIn(0f,1f)
+                    Box(Modifier.weight(1f).height(10.dp).clip(RoundedCornerShape(8.dp))
                         .background(npNeutral(0xFF2A2A2A))) {
                         Box(Modifier.fillMaxHeight().fillMaxWidth(fill).background(
-                            if (wave > .05f && wave < .95f) Red else White, RoundedCornerShape(8.dp)))
+                            if (wave > .12f) androidx.compose.ui.graphics.lerp(White, Red, wave) else White, RoundedCornerShape(8.dp)))
                     }
                 }
             }
             if (completed && finish.value < .92f) Canvas(Modifier.fillMaxSize()) {
-                val p=finish.value; val head=(size.width*(p*1.14f-.07f)).coerceIn(0f,size.width)
+                val p=finish.value; val head=size.width*p
                 drawLine(White.copy(alpha=(1f-p)*.65f),Offset(head-42.dp.toPx(),size.height/2),Offset(head,size.height/2),
                     2.dp.toPx(),StrokeCap.Round)
                 repeat(18) { i ->
-                    val birth=i/22f; val q=((p-birth)*2.1f).coerceIn(0f,1f)
+                    val birth=i/18f; val q=((p-birth)*2.1f).coerceIn(0f,1f)
                     if(q>0f && q<1f){
                         val x=size.width*birth + kotlin.math.sin(i*2.7).toFloat()*q*16.dp.toPx()
                         val direction=if(i%2==0)-1f else 1f
@@ -1846,8 +1834,14 @@ private fun ProgressOrbit(
                     drawArc(npNeutral(0xFF2A2A2A), segStart, sweepDeg, false,
                         Offset(inset, inset), arcSize, style = Stroke(stroke, cap = StrokeCap.Round))
                     val fill = (animatedSegments - i).coerceIn(0f, 1f)
-                    if (fill > 0f) drawArc(White, segStart, sweepDeg * fill, false,
+                    if (fill > 0f) {
+                        val celebrationColor = if (complete && celebration.value < .88f) {
+                            val phase = ((celebration.value * 8f - i * .45f) % 2f + 2f) % 2f
+                            androidx.compose.ui.graphics.lerp(White, Red, if (phase < 1f) phase else 2f - phase)
+                        } else White
+                        drawArc(celebrationColor, segStart, sweepDeg * fill, false,
                         Offset(inset, inset), arcSize, style = Stroke(stroke, cap = StrokeCap.Round))
+                    }
                 }
             } else {
                 drawArc(
@@ -1859,8 +1853,12 @@ private fun ProgressOrbit(
                     size = arcSize,
                     style = Stroke(stroke, cap = StrokeCap.Round)
                 )
+                val completionRingColor = if (complete && celebration.value < .88f) {
+                    val phase = (celebration.value * 6f) % 2f
+                    androidx.compose.ui.graphics.lerp(White, Red, if (phase < 1f) phase else 2f-phase)
+                } else White
                 drawArc(
-                    color = White,
+                    color = completionRingColor,
                     startAngle = -90f,
                     sweepAngle = 360f * progress.coerceIn(0f, 1f),
                     useCenter = false,
@@ -1898,8 +1896,6 @@ private fun ProgressOrbit(
                     if(i%4==0) drawRoundRect(Red.copy(alpha=alpha),Offset(x-3.dp.toPx(),y-1.dp.toPx()),Size(6.dp.toPx(),2.dp.toPx()),CornerRadius(1.dp.toPx()))
                     else drawCircle(White.copy(alpha=alpha),if(i%3==0)2.dp.toPx() else 1.25.dp.toPx(),Offset(x,y))
                 }
-                val ringPulse=((celebration.value-.05f)/.65f).coerceIn(0f,1f)
-                drawCircle(White.copy(alpha=(1f-ringPulse)*.28f),size.minDimension*(.22f+.22f*ringPulse),center,style=Stroke(1.5.dp.toPx()))
             }
         } else {
             Column(horizontalAlignment = Alignment.CenterHorizontally) {
@@ -6140,11 +6136,11 @@ private fun GlyphNav(
 
     Surface(
         modifier = modifier
-            .navigationBarsPadding()
-            .padding(horizontal = 52.dp, vertical = 10.dp)
-            .widthIn(max = 286.dp)
+            .padding(horizontal = 56.dp)
+            .padding(bottom = 22.dp)
+            .widthIn(max = 274.dp)
             .fillMaxWidth()
-            .height(58.dp),
+            .height(56.dp),
         color = Color(0xB8323232),
         shape = RoundedCornerShape(31.dp),
         border = androidx.compose.foundation.BorderStroke(1.dp, White.copy(alpha = .16f)),
