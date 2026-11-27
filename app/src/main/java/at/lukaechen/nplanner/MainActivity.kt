@@ -57,6 +57,7 @@ import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.draw.clipToBounds
 import androidx.compose.ui.draw.blur
 import androidx.compose.ui.draw.drawWithContent
 import androidx.compose.ui.graphics.drawscope.translate
@@ -126,7 +127,7 @@ private val White get() = NPlannerAppearance.palette.foreground
 private val Muted get() = NPlannerAppearance.palette.muted
 private val Red get() = NPlannerAppearance.palette.accent
 
-private const val NPLANNER_VERSION = "0.58"
+private const val NPLANNER_VERSION = "0.59"
 
 /** FIXED = feste Uhrzeit, INTERVAL = Zeitabstand mit Von/Bis, ALLDAY = ohne Zeit, WEEKLY = Flexibles Wochenziel (1..14x pro Woche). */
 enum class RuleKind { FIXED, INTERVAL, ALLDAY, ONE_TIME, WEEKLY }
@@ -1650,24 +1651,26 @@ private fun DisplayCount(done: Int, total: Int, ndot: FontFamily, fontSize: Text
     val digitStyle = TextStyle(fontFamily = family, fontWeight = weight, fontSize = fontSize,
         lineHeight = fontSize, letterSpacing = spacing, fontFeatureSettings = "tnum",
         platformStyle = PlatformTextStyle(includeFontPadding = false))
-    val slashStyle = digitStyle.copy(fontFamily = FontFamily.Default, letterSpacing = 0.sp)
+    val slashStyle = digitStyle.copy(letterSpacing = 0.sp)
     val numberWidth = with(density) {
         ('0'..'9').maxOf { measurer.measure(it.toString(), style = digitStyle, maxLines = 1).size.width }
             .times(digitSlots).toDp() + 2.dp
     }
-    val slashWidth = with(density) { measurer.measure("/", style = slashStyle, maxLines = 1).size.width.toDp() } +
-        if (useDot) 14.dp else 8.dp
+    val slashWidth = with(density) {
+        measurer.measure("/", style = slashStyle, maxLines = 1).size.width.toDp() +
+            fontSize.toPx().toDp() * (if (useDot) .30f else .14f)
+    }
     Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.Center) {
-        Box(Modifier.width(numberWidth), contentAlignment = Alignment.CenterEnd) {
+        Box(Modifier.width(numberWidth).clipToBounds(), contentAlignment = Alignment.CenterEnd) {
             Text(done.toString(), color = White, fontFamily = family, fontWeight = weight,
                 fontSize = fontSize, lineHeight = fontSize, letterSpacing = spacing,
                 maxLines = 1, softWrap = false, style = TextStyle(fontFeatureSettings = "tnum",
                     platformStyle = PlatformTextStyle(includeFontPadding = false)))
         }
-        Box(Modifier.width(slashWidth), contentAlignment = Alignment.Center) {
+        Box(Modifier.width(slashWidth).clipToBounds(), contentAlignment = Alignment.Center) {
             Text("/", color = npNeutral(0xFF5A5A5A), style = slashStyle, maxLines = 1, softWrap = false)
         }
-        Box(Modifier.width(numberWidth), contentAlignment = Alignment.CenterStart) {
+        Box(Modifier.width(numberWidth).clipToBounds(), contentAlignment = Alignment.CenterStart) {
             Text(total.toString(), color = npNeutral(0xFF5A5A5A), fontFamily = family,
                 fontWeight = weight, fontSize = fontSize, lineHeight = fontSize,
                 letterSpacing = spacing, maxLines = 1, softWrap = false,
@@ -2159,62 +2162,6 @@ private fun TaskRow(
 }
 
 @Composable
-private fun StepCounter(
-    count: Int,
-    target: Int,
-    canDec: Boolean,
-    canInc: Boolean,
-    onStep: (Int) -> Unit
-) {
-    val safeTarget = target.coerceAtLeast(1)
-    val clamped = count.coerceIn(0, safeTarget)
-
-    Row(
-        verticalAlignment = Alignment.CenterVertically,
-        horizontalArrangement = Arrangement.spacedBy(6.dp)
-    ) {
-        Box(
-            Modifier
-                .size(34.dp)
-                .clip(CircleShape)
-                .background(Panel2)
-                .clickable(enabled = canDec) { onStep(-1) },
-            contentAlignment = Alignment.Center
-        ) {
-            Text(
-                "−",
-                color = if (canDec) White else npNeutral(0xFF4C4C4C),
-                fontSize = 18.sp,
-                style = TextStyle(platformStyle = PlatformTextStyle(includeFontPadding = false))
-            )
-        }
-        Text(
-            "${clamped} / ${safeTarget}",
-            color = if (clamped >= safeTarget) Red else Color.LightGray,
-            fontFamily = FontFamily.Default,
-            fontSize = 16.sp,
-            fontWeight = if (clamped >= safeTarget) FontWeight.Medium else FontWeight.Normal
-        )
-        Box(
-            Modifier
-                .size(34.dp)
-                .clip(CircleShape)
-                .background(if (canInc) White else Panel2)
-                .clickable(enabled = canInc) { onStep(1) },
-            contentAlignment = Alignment.Center
-        ) {
-            Text(
-                "+",
-                color = if (canInc) Bg else npNeutral(0xFF4C4C4C),
-                fontSize = 18.sp,
-                fontWeight = FontWeight.Medium,
-                style = TextStyle(platformStyle = PlatformTextStyle(includeFontPadding = false))
-            )
-        }
-    }
-}
-
-@Composable
 private fun WeeklyCard(
     weekly: List<Rule>,
     tick: Int,
@@ -2306,35 +2253,99 @@ private fun WeeklyRow(
                 color = Muted,
                 fontSize = 10.sp
             )
-            Row(
-                Modifier.padding(top = if (compact) 6.dp else 9.dp),
-                horizontalArrangement = Arrangement.spacedBy(6.dp)
-            ) {
+            val emptyDot = npNeutral(0xFF333333)
+            val filledDot = Red
+            val progressLabel = if (german) "$count von $target Einheiten" else "$count of $target sessions"
+            Canvas(Modifier.fillMaxWidth().padding(top = if (compact) 6.dp else 9.dp).height(6.dp)
+                .semantics { contentDescription = progressLabel }) {
+                val pitch = minOf(12.dp.toPx(), size.width / target.coerceAtLeast(1))
+                val radius = minOf(3.dp.toPx(), pitch * .32f)
                 repeat(target) { idx ->
-                    Box(
-                        Modifier
-                            .size(6.dp)
-                            .background(if (idx < count) Red else npNeutral(0xFF333333), CircleShape)
-                    )
+                    drawCircle(if (idx < count) filledDot else emptyDot, radius,
+                        Offset(radius + idx * pitch, center.y))
                 }
             }
-            if (paused || canPause) {
-                TextButton(onClick = onTogglePause, contentPadding = PaddingValues(horizontal = 0.dp)) {
-                    Text(
-                        if (paused) (if (german) "Pause aufheben" else "Undo skip")
-                        else (if (german) "Heute pausieren" else "Skip today"),
-                        fontFamily = FontFamily.Default, color = White, fontSize = 11.sp
-                    )
-                }
-            }
+
         }
-        StepCounter(
-            count = count,
-            target = target,
-            canDec = canDec,
-            canInc = canInc,
-            onStep = onStep
-        )
+        Spacer(Modifier.width(6.dp))
+        Row(verticalAlignment = Alignment.CenterVertically) {
+            WeeklyActionButton(
+                label = if (paused) (if (german) "Pause aufheben" else "Undo skip")
+                    else (if (german) "Heute pausieren" else "Skip today"),
+                enabled = paused || canPause,
+                selected = paused,
+                onClick = onTogglePause
+            ) { ink ->
+                Canvas(Modifier.size(18.dp)) {
+                    val w = size.width
+                    val h = size.height
+                    val stroke = 1.8.dp.toPx()
+                    if (paused) {
+                        drawLine(ink, Offset(w * .30f, h * .22f), Offset(w * .30f, h * .78f), stroke, StrokeCap.Round)
+                        drawLine(ink, Offset(w * .70f, h * .22f), Offset(w * .70f, h * .78f), stroke, StrokeCap.Round)
+                    } else {
+                        val arrow = Path().apply {
+                            moveTo(w * .19f, h * .21f)
+                            lineTo(w * .61f, h * .50f)
+                            lineTo(w * .19f, h * .79f)
+                            close()
+                        }
+                        drawPath(arrow, ink)
+                        drawLine(ink, Offset(w * .79f, h * .22f), Offset(w * .79f, h * .78f), stroke, StrokeCap.Round)
+                    }
+                }
+            }
+            WeeklyActionButton(
+                label = if (german) "Einheit zurücknehmen" else "Remove session",
+                enabled = canDec, onClick = { onStep(-1) }
+            ) { ink -> WeeklyStepGlyph(ink, plus = false) }
+            WeeklyActionButton(
+                label = if (german) "Einheit hinzufügen" else "Add session",
+                enabled = canInc, primary = true, onClick = { onStep(1) }
+            ) { ink -> WeeklyStepGlyph(ink, plus = true) }
+        }
+    }
+}
+
+@Composable
+private fun WeeklyActionButton(
+    label: String,
+    enabled: Boolean,
+    onClick: () -> Unit,
+    selected: Boolean = false,
+    primary: Boolean = false,
+    glyph: @Composable (Color) -> Unit
+) {
+    val fill = when {
+        selected -> Red
+        primary && enabled -> White
+        else -> Panel2
+    }
+    val ink = when {
+        selected -> Color.White
+        !enabled -> Muted.copy(alpha = .55f)
+        primary -> Bg
+        else -> White
+    }
+    Box(
+        Modifier.size(48.dp)
+            .clip(CircleShape)
+            .semantics { contentDescription = label }
+            .clickable(enabled = enabled, role = androidx.compose.ui.semantics.Role.Button, onClick = onClick),
+        contentAlignment = Alignment.Center
+    ) {
+        Box(Modifier.size(34.dp).background(fill, CircleShape), contentAlignment = Alignment.Center) {
+            glyph(ink)
+        }
+    }
+}
+
+@Composable
+private fun WeeklyStepGlyph(ink: Color, plus: Boolean) {
+    Canvas(Modifier.size(16.dp)) {
+        val stroke = 1.8.dp.toPx()
+        drawLine(ink, Offset(size.width * .20f, center.y), Offset(size.width * .80f, center.y), stroke, StrokeCap.Round)
+        if (plus) drawLine(ink, Offset(center.x, size.height * .20f), Offset(center.x, size.height * .80f), stroke, StrokeCap.Round)
     }
 }
 
