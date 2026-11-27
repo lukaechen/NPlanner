@@ -14,21 +14,15 @@ android {
         minSdk = 26
         targetSdk = 35
         versionCode = (System.getenv("GITHUB_RUN_NUMBER") ?: "1").toInt()
-        versionName = "0.44"
+        versionName = "0.50"
     }
 
     signingConfigs {
         create("release") {
-            storeFile = file(
-                System.getenv("NPLANNER_KEYSTORE_PATH")
-                    ?: error("NPLANNER_KEYSTORE_PATH fehlt")
-            )
-            storePassword = System.getenv("NPLANNER_KEYSTORE_PASSWORD")
-                ?: error("NPLANNER_KEYSTORE_PASSWORD fehlt")
-            keyAlias = System.getenv("NPLANNER_KEY_ALIAS")
-                ?: error("NPLANNER_KEY_ALIAS fehlt")
-            keyPassword = System.getenv("NPLANNER_KEY_PASSWORD")
-                ?: error("NPLANNER_KEY_PASSWORD fehlt")
+            storeFile = file(System.getenv("NPLANNER_KEYSTORE_PATH") ?: error("NPLANNER_KEYSTORE_PATH fehlt"))
+            storePassword = System.getenv("NPLANNER_KEYSTORE_PASSWORD") ?: error("NPLANNER_KEYSTORE_PASSWORD fehlt")
+            keyAlias = System.getenv("NPLANNER_KEY_ALIAS") ?: error("NPLANNER_KEY_ALIAS fehlt")
+            keyPassword = System.getenv("NPLANNER_KEY_PASSWORD") ?: error("NPLANNER_KEY_PASSWORD fehlt")
         }
     }
 
@@ -40,12 +34,7 @@ android {
     }
 
     buildFeatures { compose = true }
-
-    compileOptions {
-        sourceCompatibility = JavaVersion.VERSION_17
-        targetCompatibility = JavaVersion.VERSION_17
-    }
-
+    compileOptions { sourceCompatibility = JavaVersion.VERSION_17; targetCompatibility = JavaVersion.VERSION_17 }
     kotlinOptions { jvmTarget = "17" }
 }
 
@@ -58,4 +47,6 @@ dependencies {
     implementation("androidx.room:room-runtime:2.8.4")
     implementation("androidx.room:room-ktx:2.8.4")
     ksp("androidx.room:room-compiler:2.8.4")
+    implementation("com.google.android.gms:play-services-auth:22.0.0")
+    implementation("androidx.work:work-runtime-ktx:2.10.1")
 }
