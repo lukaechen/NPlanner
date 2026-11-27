@@ -90,6 +90,7 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.compose.ui.viewinterop.AndroidView
 import androidx.compose.ui.window.Dialog
+import androidx.core.view.WindowCompat
 import androidx.compose.ui.window.DialogProperties
 import androidx.compose.ui.zIndex
 import kotlinx.coroutines.delay
@@ -115,7 +116,7 @@ private val White get() = NPlannerAppearance.palette.foreground
 private val Muted get() = NPlannerAppearance.palette.muted
 private val Red get() = NPlannerAppearance.palette.accent
 
-private const val NPLANNER_VERSION = "0.54"
+private const val NPLANNER_VERSION = "0.55"
 
 /** FIXED = feste Uhrzeit, INTERVAL = Zeitabstand mit Von/Bis, ALLDAY = ohne Zeit, WEEKLY = Flexibles Wochenziel (1..14x pro Woche). */
 enum class RuleKind { FIXED, INTERVAL, ALLDAY, ONE_TIME, WEEKLY }
@@ -344,42 +345,18 @@ private fun weekStartKey(d: LocalDate): String =
     d.minusDays((d.dayOfWeek.value - 1).toLong()).toString()
 
 private fun triggerHaptic(context: Context, haptic: HapticFeedback, style: HapticStyle) {
-    // Common actions use Android's action-based feedback so every tap is consistent and respects system settings.
     if (style != HapticStyle.DAY_COMPLETE) {
-        runCatching {
-            haptic.performHapticFeedback(
-                when (style) {
-                    HapticStyle.TASK_DONE -> HapticFeedbackType.LongPress
-                    HapticStyle.UNDO -> HapticFeedbackType.TextHandleMove
-                    HapticStyle.TICK -> HapticFeedbackType.TextHandleMove
-                    else -> HapticFeedbackType.TextHandleMove
-                }
-            )
-        }
+        runCatching { haptic.performHapticFeedback(if (style == HapticStyle.TICK) HapticFeedbackType.TextHandleMove else HapticFeedbackType.LongPress) }
         return
     }
-    // Day complete deliberately gets a richer, unmistakable finish pattern.
-    val vibrator = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
+    val vibrator = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S)
         (context.getSystemService(Context.VIBRATOR_MANAGER_SERVICE) as? VibratorManager)?.defaultVibrator
-    } else {
-        @Suppress("DEPRECATION") context.getSystemService(Context.VIBRATOR_SERVICE) as? Vibrator
-    }
+    else @Suppress("DEPRECATION") (context.getSystemService(Context.VIBRATOR_SERVICE) as? Vibrator)
     val played = runCatching {
         if (vibrator == null || !vibrator.hasVibrator()) false else {
-            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
-                val effect = VibrationEffect.startComposition()
-                    .addPrimitive(VibrationEffect.Composition.PRIMITIVE_TICK, .65f)
-                    .addPrimitive(VibrationEffect.Composition.PRIMITIVE_CLICK, .90f, 55)
-                    .addPrimitive(VibrationEffect.Composition.PRIMITIVE_THUD, 1.0f, 85)
-                    .compose()
-                vibrator.vibrate(effect)
-            } else if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
-                vibrator.vibrate(VibrationEffect.createWaveform(
-                    longArrayOf(0L, 24L, 42L, 38L, 54L, 75L),
-                    intArrayOf(0, 105, 0, 175, 0, 255), -1))
-            } else {
-                @Suppress("DEPRECATION") vibrator.vibrate(longArrayOf(0L, 28L, 45L, 42L, 60L, 80L), -1)
-            }
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) vibrator.vibrate(
+                VibrationEffect.createWaveform(longArrayOf(0,20,38,34,54,85), intArrayOf(0,105,0,185,0,255), -1))
+            else @Suppress("DEPRECATION") vibrator.vibrate(longArrayOf(0,22,40,38,56,90), -1)
             true
         }
     }.getOrDefault(false)
@@ -846,6 +823,8 @@ class MainActivity : ComponentActivity() {
         NPlannerDriveBackup.applyPendingRestore(this)
         super.onCreate(savedInstanceState)
         enableEdgeToEdge()
+        WindowCompat.setDecorFitsSystemWindows(window, false)
+        window.navigationBarColor = android.graphics.Color.TRANSPARENT
         window.isNavigationBarContrastEnforced = false
         NPlannerAppearance.initialize(this)
         seedEditableWorkoutTemplates(this)
@@ -1179,11 +1158,11 @@ class MainActivity : ComponentActivity() {
         }
 
         fun deleteRule(ruleId: String) {
+            triggerHaptic(context, haptic, HapticStyle.UNDO)
             freezeHistoryBeforeRuleChange()
             rules = rules.filterNot { it.id == ruleId }
             saveRules(rules)
             persistTodaySnapshot(date)
-            triggerHaptic(context, haptic, HapticStyle.UNDO)
             tick++
         }
 
@@ -1191,6 +1170,7 @@ class MainActivity : ComponentActivity() {
         val pageScrollStates = remember { List(4) { ScrollState(0) } }
         val scope = rememberCoroutineScope()
         var pageOrder by remember { mutableStateOf(listOf(0, 1, 2, 3)) }
+        val navCompact by remember { derivedStateOf { val logical=pageOrder.getOrElse(pagerState.currentPage){pagerState.currentPage}.coerceIn(0,3); pageScrollStates[logical].value > 56 } }
         var directTarget by remember { mutableStateOf<Int?>(null) }
         var navigationJob by remember { mutableStateOf<kotlinx.coroutines.Job?>(null) }
 
@@ -1430,6 +1410,7 @@ class MainActivity : ComponentActivity() {
                 GlyphNav(
                     pagerState = pagerState,
                     directTarget = directTarget,
+                    compact = navCompact,
                     select = ::selectPage,
                     modifier = Modifier.align(Alignment.BottomCenter)
                 )
@@ -1546,7 +1527,7 @@ private fun Screen(
         .fillMaxSize()
         .statusBarsPadding()
         .padding(horizontal = 22.dp)
-        .padding(top = if (compactHeader) 8.dp else 12.dp, bottom = if (compactHeader) 92.dp else 102.dp)
+        .padding(top = if (compactHeader) 8.dp else 12.dp, bottom = 28.dp)
     Column(if (scrollable) base.imePadding().verticalScroll(LocalPageScroll.current ?: rememberScrollState()) else base) {
         Row(verticalAlignment = Alignment.CenterVertically) {
             Box(Modifier.size(6.dp).background(Red, CircleShape))
@@ -1749,51 +1730,27 @@ private fun TodayScreen(
 
 @Composable
 private fun ProgressBars(done: Int, total: Int, ndot: FontFamily) {
-    val animatedDone by animateFloatAsState(done.toFloat(),
-        spring(dampingRatio = Spring.DampingRatioNoBouncy, stiffness = Spring.StiffnessLow), label = "bar_progress")
+    val animatedDone by animateFloatAsState(done.toFloat(), spring(dampingRatio = Spring.DampingRatioNoBouncy, stiffness = Spring.StiffnessLow), label = "bar_progress")
     val completed = total > 0 && done >= total
-    val finish = remember { Animatable(1f) }
-    LaunchedEffect(completed) {
-        if (completed) {
-            finish.snapTo(0f)
-            finish.animateTo(1f, tween(1450, easing = FastOutSlowInEasing))
-        }
-    }
+    val celebration = remember { Animatable(1f) }
+    LaunchedEffect(completed) { if (completed) { celebration.snapTo(0f); celebration.animateTo(1f, tween(1850, easing = FastOutSlowInEasing)) } }
     Column(Modifier.fillMaxWidth()) {
         Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.Bottom, horizontalArrangement = Arrangement.SpaceBetween) {
             DisplayCount(done, total, ndot, 84.sp)
-            Text(if (completed) npString(R.string.np_595b69683dcf) else npString(R.string.np_71f43d0f0475),
-                color = Muted, fontFamily = FontFamily.Default, fontSize = 10.sp, letterSpacing = 2.sp,
-                modifier = Modifier.padding(bottom = 6.dp))
+            Text(if (completed) npString(R.string.np_595b69683dcf) else npString(R.string.np_71f43d0f0475), color = Muted, fontFamily = FontFamily.Default, fontSize = 10.sp, letterSpacing = 2.sp, modifier = Modifier.padding(bottom = 6.dp))
         }
         Spacer(Modifier.height(16.dp))
-        Box(Modifier.fillMaxWidth().height(42.dp), contentAlignment = Alignment.Center) {
+        Box(Modifier.fillMaxWidth().height(38.dp), contentAlignment = Alignment.Center) {
             Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(if (total > 10) 3.dp else 6.dp)) {
                 repeat(total.coerceAtLeast(1)) { i ->
                     val fill = if (total == 0) 1f else (animatedDone - i).coerceIn(0f,1f)
-                    val waveHead = if (completed) finish.value * total.coerceAtLeast(1) else -1f
-                    val wave = (1f - kotlin.math.abs(waveHead - (i + .5f)) * 1.35f).coerceIn(0f,1f)
-                    Box(Modifier.weight(1f).height(10.dp).clip(RoundedCornerShape(8.dp))
-                        .background(npNeutral(0xFF2A2A2A))) {
-                        Box(Modifier.fillMaxHeight().fillMaxWidth(fill).background(
-                            if (wave > .12f) androidx.compose.ui.graphics.lerp(White, Red, wave) else White, RoundedCornerShape(8.dp)))
-                    }
+                    val c = if (completed && celebration.value < .88f) { val phase=((celebration.value*8f-i*.46f)%2f+2f)%2f; androidx.compose.ui.graphics.lerp(White,Red,if(phase<1f)phase else 2f-phase) } else White
+                    Box(Modifier.weight(1f).height(10.dp).clip(RoundedCornerShape(6.dp)).background(npNeutral(0xFF2A2A2A))) { Box(Modifier.fillMaxHeight().fillMaxWidth(fill).background(c,RoundedCornerShape(6.dp))) }
                 }
             }
-            if (completed && finish.value < .92f) Canvas(Modifier.fillMaxSize()) {
-                val p=finish.value; val head=size.width*p
-                drawLine(White.copy(alpha=(1f-p)*.65f),Offset(head-42.dp.toPx(),size.height/2),Offset(head,size.height/2),
-                    2.dp.toPx(),StrokeCap.Round)
-                repeat(18) { i ->
-                    val birth=i/18f; val q=((p-birth)*2.1f).coerceIn(0f,1f)
-                    if(q>0f && q<1f){
-                        val x=size.width*birth + kotlin.math.sin(i*2.7).toFloat()*q*16.dp.toPx()
-                        val direction=if(i%2==0)-1f else 1f
-                        val y=size.height/2 + direction*(5.dp.toPx()+q*17.dp.toPx())
-                        if(i%3==0) drawRoundRect(Red.copy(alpha=1f-q),Offset(x,y),Size(5.dp.toPx(),2.dp.toPx()),CornerRadius(1.dp.toPx()))
-                        else drawCircle(White.copy(alpha=1f-q),if(i%4==0)2.dp.toPx() else 1.2.dp.toPx(),Offset(x,y))
-                    }
-                }
+            if (completed && celebration.value < .82f) Canvas(Modifier.fillMaxSize()) {
+                val burst=((celebration.value-.18f)/.58f).coerceIn(0f,1f)
+                repeat(20) { i -> val base=(i+.5f)/20f; val stagger=(i%5)*.04f; val q=((burst-stagger)/(1f-stagger)).coerceIn(0f,1f); if(q>0f&&q<1f){ val dir=if(i%2==0)-1f else 1f; val x=size.width*base+kotlin.math.sin(i*2.1).toFloat()*q*8.dp.toPx(); val y=size.height/2+dir*(5.dp.toPx()+q*14.dp.toPx()); if(i%4==0)drawRoundRect(Red.copy(alpha=1f-q),Offset(x-3.dp.toPx(),y),Size(6.dp.toPx(),2.dp.toPx()),CornerRadius(1.dp.toPx())) else drawCircle(White.copy(alpha=1f-q),if(i%3==0)1.8.dp.toPx() else 1.1.dp.toPx(),Offset(x,y)) } }
             }
         }
     }
@@ -6112,6 +6069,7 @@ private enum class NavGlyph { TODAY, HISTORY, TRAINING, SETUP }
 private fun GlyphNav(
     pagerState: androidx.compose.foundation.pager.PagerState,
     directTarget: Int?,
+    compact: Boolean,
     select: (Int) -> Unit,
     modifier: Modifier
 ) {
@@ -6134,13 +6092,11 @@ private fun GlyphNav(
         label = "nav_pill_slide"
     )
 
+    val navWidth by animateDpAsState(if (compact) 264.dp else 322.dp, tween(220), label = "nav_width")
+    val navHeight by animateDpAsState(if (compact) 52.dp else 62.dp, tween(220), label = "nav_height")
+    val navBottom by animateDpAsState(if (compact) 30.dp else 24.dp, tween(220), label = "nav_bottom")
     Surface(
-        modifier = modifier
-            .padding(horizontal = 56.dp)
-            .padding(bottom = 22.dp)
-            .widthIn(max = 274.dp)
-            .fillMaxWidth()
-            .height(56.dp),
+        modifier = modifier.padding(bottom = navBottom).width(navWidth).height(navHeight),
         color = Color(0xB8323232),
         shape = RoundedCornerShape(31.dp),
         border = androidx.compose.foundation.BorderStroke(1.dp, White.copy(alpha = .16f)),
