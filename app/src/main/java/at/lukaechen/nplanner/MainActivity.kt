@@ -127,12 +127,12 @@ private val White get() = NPlannerAppearance.palette.foreground
 private val Muted get() = NPlannerAppearance.palette.muted
 private val Red get() = NPlannerAppearance.palette.accent
 
-private const val NPLANNER_VERSION = "0.59"
+private const val NPLANNER_VERSION = "0.60"
 
 /** FIXED = feste Uhrzeit, INTERVAL = Zeitabstand mit Von/Bis, ALLDAY = ohne Zeit, WEEKLY = Flexibles Wochenziel (1..14x pro Woche). */
 enum class RuleKind { FIXED, INTERVAL, ALLDAY, ONE_TIME, WEEKLY }
 
-enum class HapticStyle { TASK_DONE, DAY_COMPLETE, UNDO, TICK }
+enum class HapticStyle { TASK_DONE, DAY_COMPLETE, UNDO, TICK, CONFIRM, DELETE }
 
 /** Sport-Uebungstypen: WEIGHT = Gewicht x Wdh., BODYWEIGHT = Eigengewicht x Wdh., TIMED = Zeit / X Wdh. in Y Sek. */
 enum class ExerciseKind { WEIGHT, BODYWEIGHT, TIMED, CARDIO, AMRAP }
@@ -361,13 +361,6 @@ private fun triggerHaptic(
     style: HapticStyle,
     view: android.view.View? = null
 ) {
-    if (style != HapticStyle.DAY_COMPLETE && style != HapticStyle.UNDO && style != HapticStyle.TASK_DONE) {
-        haptic.performHapticFeedback(
-            if (style == HapticStyle.TASK_DONE) HapticFeedbackType.LongPress else HapticFeedbackType.TextHandleMove
-        )
-        return
-    }
-
     if (view?.isHapticFeedbackEnabled == false ||
         android.provider.Settings.System.getInt(
             context.contentResolver, android.provider.Settings.System.HAPTIC_FEEDBACK_ENABLED, 1
@@ -375,16 +368,16 @@ private fun triggerHaptic(
     ) return
 
     val undo = style == HapticStyle.UNDO
-    val single = style == HapticStyle.TASK_DONE
-    val rhythm = when {
-        undo -> longArrayOf(0L, 14L)
-        single -> longArrayOf(0L, 30L)
-        else -> longArrayOf(0L, 19L, 54L, 24L, 145L, 36L, 48L, 44L, 57L, 52L, 155L, 21L, 65L, 68L)
-    }
-    val strengths = when {
-        undo -> intArrayOf(0, 55)
-        single -> intArrayOf(0, 155)
-        else -> intArrayOf(0, 82, 0, 112, 0, 135, 0, 174, 0, 215, 0, 125, 0, 245)
+    val lightweight = undo || style == HapticStyle.TICK
+    val (rhythm, strengths) = when (style) {
+        HapticStyle.TICK -> longArrayOf(0L, 10L) to intArrayOf(0, 60)
+        HapticStyle.UNDO -> longArrayOf(0L, 18L) to intArrayOf(0, 85)
+        HapticStyle.TASK_DONE -> longArrayOf(0L, 33L) to intArrayOf(0, 175)
+        HapticStyle.CONFIRM -> longArrayOf(0L, 18L, 45L, 31L) to intArrayOf(0, 100, 0, 185)
+        HapticStyle.DELETE -> longArrayOf(0L, 38L, 55L, 17L) to intArrayOf(0, 205, 0, 95)
+        HapticStyle.DAY_COMPLETE ->
+            longArrayOf(0L, 18L, 52L, 24L, 135L, 25L, 48L, 35L, 48L, 47L, 158L, 23L, 66L, 75L) to
+                intArrayOf(0, 85, 0, 125, 0, 135, 0, 175, 0, 215, 0, 140, 0, 250)
     }
     val played = if (context.checkSelfPermission(android.Manifest.permission.VIBRATE) ==
         android.content.pm.PackageManager.PERMISSION_GRANTED
@@ -395,25 +388,9 @@ private fun triggerHaptic(
             @Suppress("DEPRECATION")
             (context.getSystemService(Context.VIBRATOR_SERVICE) as? Vibrator)
         }
-        if (vibrator == null || !vibrator.hasVibrator() || (undo && !vibrator.hasAmplitudeControl())) false else {
-            val effect = if (!undo && !single && Build.VERSION.SDK_INT >= Build.VERSION_CODES.S &&
-                vibrator.areAllPrimitivesSupported(
-                    VibrationEffect.Composition.PRIMITIVE_TICK,
-                    VibrationEffect.Composition.PRIMITIVE_CLICK,
-                    VibrationEffect.Composition.PRIMITIVE_QUICK_RISE,
-                    VibrationEffect.Composition.PRIMITIVE_THUD
-                )
-            ) {
-                VibrationEffect.startComposition()
-                    .addPrimitive(VibrationEffect.Composition.PRIMITIVE_TICK, .40f)
-                    .addPrimitive(VibrationEffect.Composition.PRIMITIVE_TICK, .65f, 60)
-                    .addPrimitive(VibrationEffect.Composition.PRIMITIVE_CLICK, .60f, 135)
-                    .addPrimitive(VibrationEffect.Composition.PRIMITIVE_CLICK, .85f, 65)
-                    .addPrimitive(VibrationEffect.Composition.PRIMITIVE_QUICK_RISE, .90f, 80)
-                    .addPrimitive(VibrationEffect.Composition.PRIMITIVE_TICK, .60f, 150)
-                    .addPrimitive(VibrationEffect.Composition.PRIMITIVE_THUD, 1f, 75)
-                    .compose()
-            } else if (vibrator.hasAmplitudeControl()) {
+        if (vibrator == null || !vibrator.hasVibrator() || (lightweight && !vibrator.hasAmplitudeControl())) false else {
+            // The lengths and rhythm remain distinct even if amplitudes are flattened by the device.
+            val effect = if (vibrator.hasAmplitudeControl()) {
                 VibrationEffect.createWaveform(rhythm, strengths, -1)
             } else {
                 VibrationEffect.createWaveform(rhythm, -1)
@@ -433,31 +410,48 @@ private fun triggerHaptic(
     }.getOrDefault(false) else false
 
     if (played) return
-    if (single) {
-        haptic.performHapticFeedback(HapticFeedbackType.LongPress)
-        return
-    }
-    if (undo) {
-        if (view != null && Build.VERSION.SDK_INT >= Build.VERSION_CODES.UPSIDE_DOWN_CAKE &&
-            view.performHapticFeedback(android.view.HapticFeedbackConstants.SEGMENT_FREQUENT_TICK)
-        ) return
-        haptic.performHapticFeedback(HapticFeedbackType.TextHandleMove)
-        return
-    }
+    // Platform effects also work when the app has no VIBRATE permission.
+    val soft = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.UPSIDE_DOWN_CAKE)
+        android.view.HapticFeedbackConstants.SEGMENT_FREQUENT_TICK
+    else android.view.HapticFeedbackConstants.CLOCK_TICK
+    val click = android.view.HapticFeedbackConstants.CLOCK_TICK
+    val firm = android.view.HapticFeedbackConstants.LONG_PRESS
     if (view != null) {
-        val soft = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.UPSIDE_DOWN_CAKE)
-            android.view.HapticFeedbackConstants.SEGMENT_FREQUENT_TICK
-        else android.view.HapticFeedbackConstants.CLOCK_TICK
-        val mid = android.view.HapticFeedbackConstants.CLOCK_TICK
-        val hit = android.view.HapticFeedbackConstants.LONG_PRESS
-        val beats = intArrayOf(soft, soft, mid, mid, hit, soft, hit)
-        longArrayOf(0L, 86L, 261L, 347L, 454L, 671L, 736L).forEachIndexed { index, at ->
-            view.postDelayed({
-                if (view.isAttachedToWindow && view.hasWindowFocus()) view.performHapticFeedback(beats[index])
-            }, at)
+        when (style) {
+            HapticStyle.TICK -> view.performHapticFeedback(soft)
+            HapticStyle.UNDO -> view.performHapticFeedback(click)
+            HapticStyle.TASK_DONE -> view.performHapticFeedback(firm)
+            else -> {
+                val (timing, effects) = when (style) {
+                    HapticStyle.CONFIRM -> longArrayOf(0L, 65L) to intArrayOf(soft, firm)
+                    HapticStyle.DELETE -> longArrayOf(0L, 92L) to intArrayOf(firm, soft)
+                    else -> longArrayOf(0L, 70L, 229L, 302L, 385L, 590L, 679L) to
+                        intArrayOf(soft, click, click, click, firm, soft, firm)
+                }
+                timing.forEachIndexed { index, at ->
+                    if (index == 0) view.performHapticFeedback(effects[index])
+                    else view.postDelayed({
+                        if (view.isAttachedToWindow && view.hasWindowFocus()) view.performHapticFeedback(effects[index])
+                    }, at)
+                }
+            }
         }
     } else {
-        haptic.performHapticFeedback(HapticFeedbackType.LongPress)
+        haptic.performHapticFeedback(if (lightweight) HapticFeedbackType.TextHandleMove else HapticFeedbackType.LongPress)
+    }
+}
+
+@Composable
+internal fun npHapticClick(onClick: () -> Unit): () -> Unit = npActionWithHaptics(HapticStyle.TICK, onClick)
+
+@Composable
+private fun npActionWithHaptics(style: HapticStyle, onClick: () -> Unit): () -> Unit {
+    val context = LocalContext.current
+    val feedback = LocalHapticFeedback.current
+    val view = LocalView.current
+    return {
+        triggerHaptic(context, feedback, style, view)
+        onClick()
     }
 }
 
@@ -1299,7 +1293,7 @@ class MainActivity : ComponentActivity() {
         }
 
         fun deleteRule(ruleId: String) {
-            triggerHaptic(context, haptic, HapticStyle.UNDO)
+            triggerHaptic(context, haptic, HapticStyle.DELETE, feedbackView)
             freezeHistoryBeforeRuleChange()
             rules = rules.filterNot { it.id == ruleId }
             saveRules(rules)
@@ -1493,27 +1487,31 @@ class MainActivity : ComponentActivity() {
                             rules = rules.filterNot { it.archived },
                             useDotHeadings = dotHeadings,
                             onHeadingStyleChange = { enabled ->
+                                val changed = dotHeadings != enabled
                                 dotHeadings = enabled
                                 prefs.edit().putBoolean("use_ndot_headings", enabled).apply()
-                                triggerHaptic(context, haptic, HapticStyle.TICK)
+                                if (changed) triggerHaptic(context, haptic, HapticStyle.TICK, feedbackView)
                             },
                             orbit = orbit,
                             onProgressStyleChange = { useOrbit ->
+                                val changed = orbit != useOrbit
                                 orbit = useOrbit
                                 prefs.edit().putString("progress_style", if (useOrbit) "orbit" else "bars").apply()
-                                triggerHaptic(context, haptic, HapticStyle.TICK)
+                                if (changed) triggerHaptic(context, haptic, HapticStyle.TICK, feedbackView)
                             },
                             historyDots = historyDots,
                             onHistoryStyleChange = { useDots ->
+                                val changed = historyDots != useDots
                                 historyDots = useDots
                                 prefs.edit().putString("history_style", if (useDots) "dots" else "calendar").apply()
-                                triggerHaptic(context, haptic, HapticStyle.TICK)
+                                if (changed) triggerHaptic(context, haptic, HapticStyle.TICK, feedbackView)
                             },
                             testMode = testMode,
                             onTestModeChange = { enabled ->
+                                val changed = testMode != enabled
                                 testMode = enabled
                                 prefs.edit().putBoolean("test_mode_multi_weekly", enabled).apply()
-                                triggerHaptic(context, haptic, HapticStyle.TICK)
+                                if (changed) triggerHaptic(context, haptic, HapticStyle.TICK, feedbackView)
                             },
                             onMove = { from, to ->
                                 if (from in rules.indices && to in rules.indices && from != to) {
@@ -2317,12 +2315,12 @@ private fun WeeklyActionButton(
     glyph: @Composable (Color) -> Unit
 ) {
     val fill = when {
-        selected -> Red
+        selected -> White
         primary && enabled -> White
         else -> Panel2
     }
     val ink = when {
-        selected -> Color.White
+        selected -> Bg
         !enabled -> Muted.copy(alpha = .55f)
         primary -> Bg
         else -> White
@@ -4201,7 +4199,7 @@ private fun AmrapSummaryDialog(result: JSONObject, ndot: FontFamily, onDelete: (
                     if (i < items.length() - 1) HorizontalDivider(color = npNeutral(0xFF303030))
                 }
                 Spacer(Modifier.height(14.dp))
-                Button(onClick = onClose, modifier = Modifier.fillMaxWidth().height(48.dp),
+                Button(onClick = npHapticClick(onClose), modifier = Modifier.fillMaxWidth().height(48.dp),
                     colors = ButtonDefaults.buttonColors(containerColor = White, contentColor = Bg),
                     shape = RoundedCornerShape(16.dp)) { Text(npString(R.string.np_5b769ca72f3c)) }
             }
@@ -4559,7 +4557,7 @@ private fun WorkoutSessionSummary(
                     }
                 }
                 Spacer(Modifier.height(12.dp))
-                Button(onClick = onClose, modifier = Modifier.fillMaxWidth().height(48.dp),
+                Button(onClick = npHapticClick(onClose), modifier = Modifier.fillMaxWidth().height(48.dp),
                     shape = RoundedCornerShape(16.dp), colors = ButtonDefaults.buttonColors(containerColor = White, contentColor = Bg)) {
                     Text(npString(R.string.np_5b769ca72f3c))
                 }
@@ -4818,8 +4816,8 @@ private fun WorkoutSheetDialog(
                     Text(if (isActive) npString(R.string.np_3d6849f8dec5) else npString(R.string.np_115e71776c64), color = if (isActive) Red else Muted,
                         fontFamily = FontFamily.Default, fontSize = 10.sp, letterSpacing = 1.3.sp,
                         modifier = Modifier.weight(1f))
-                    IconButton(onClick = onSaveTemplate, modifier = Modifier.semantics { contentDescription = npString(R.string.np_7295825fe629) }) { WorkoutTemplateIcon() }
-                    IconButton(onClick = onEditWorkout, modifier = Modifier.semantics { contentDescription = npString(R.string.np_6c4a58f36192) }) { WorkoutActionIcon(WorkoutAction.EDIT) }
+                    IconButton(onClick = npHapticClick(onSaveTemplate), modifier = Modifier.semantics { contentDescription = npString(R.string.np_7295825fe629) }) { WorkoutTemplateIcon() }
+                    IconButton(onClick = npHapticClick(onEditWorkout), modifier = Modifier.semantics { contentDescription = npString(R.string.np_6c4a58f36192) }) { WorkoutActionIcon(WorkoutAction.EDIT) }
                     IconButton(onClick = { confirmDelete = true }, modifier = Modifier.semantics { contentDescription = npString(R.string.np_081c6a21268a) }) { WorkoutActionIcon(WorkoutAction.DELETE, Red) }
                 }
                 DisplayTitle(workout.name, ndot, fontSize = 25.sp)
@@ -4832,10 +4830,10 @@ private fun WorkoutSheetDialog(
                 Spacer(Modifier.height(12.dp))
                 Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                     Surface(color = Panel2, shape = RoundedCornerShape(14.dp),
-                        modifier = Modifier.weight(1f).clickable(onClick = onAddExistingExercise)) {
+                        modifier = Modifier.weight(1f).clickable(onClick = npHapticClick(onAddExistingExercise))) {
                         Text(npString(R.string.np_afafcf8171c4), color = White, fontSize = 12.sp, modifier = Modifier.padding(13.dp))
                     }
-                    Surface(color = Panel2, shape = RoundedCornerShape(14.dp), modifier = Modifier.clickable(onClick = onAddNewExercise)) {
+                    Surface(color = Panel2, shape = RoundedCornerShape(14.dp), modifier = Modifier.clickable(onClick = npHapticClick(onAddNewExercise))) {
                         Text(npString(R.string.np_694aa76eb977), color = White, fontSize = 12.sp, modifier = Modifier.padding(13.dp))
                     }
                 }
@@ -5440,7 +5438,7 @@ private fun ExerciseDetailDialog(
                                 onClick = { showExerciseActions = false; onRemoveFromWorkout() })
                         }
                     }
-                    IconButton(onClick = onEditExercise) { WorkoutActionIcon(WorkoutAction.EDIT) }
+                    IconButton(onClick = npHapticClick(onEditExercise)) { WorkoutActionIcon(WorkoutAction.EDIT) }
                     IconButton(onClick = { confirmExerciseDelete = true }) { WorkoutActionIcon(WorkoutAction.DELETE, Red) }
                 }
                 DisplayTitle(exercise.name.uppercase(npLocale()), ndot, fontSize = 26.sp)
@@ -6599,7 +6597,7 @@ private fun SetupScreen(
             horizontalArrangement = Arrangement.SpaceBetween
         ) {
             Text(npString(R.string.np_2af464a2d2d7), color = Muted, fontFamily = FontFamily.Default, fontSize = 10.sp, letterSpacing = 1.7.sp)
-            TextButton(onClick = onAdd) {
+            TextButton(onClick = npHapticClick(onAdd)) {
                 Text(npString(R.string.np_06df2fea07b8), color = White, fontFamily = FontFamily.Default, fontSize = 11.sp, letterSpacing = 1.7.sp)
             }
         }
@@ -6717,62 +6715,65 @@ private fun SetupScreen(
             }
         }
 
-        Spacer(Modifier.height(16.dp))
-        SectionLabel(npString(R.string.np_b8331e795763))
-        NPlannerAppearanceSettings()
-        Surface(color = Panel, shape = RoundedCornerShape(22.dp), modifier = Modifier.fillMaxWidth()) {
-            Column(Modifier.padding(16.dp)) {
-                Text(npString(R.string.np_29db02be308f), fontSize = 16.sp, color = White, fontWeight = FontWeight.Medium)
-                Text(npString(R.string.np_ed3994287ff4), fontSize = 11.sp, color = Muted)
-                Spacer(Modifier.height(12.dp))
-                Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                    listOf(false to npString(R.string.np_2cc58a112d0a), true to npString(R.string.np_db4262bdee36)).forEach { (dot, label) ->
-                        Surface(
-                            modifier = Modifier.weight(1f).clickable { onHeadingStyleChange(dot) },
-                            color = if (useDotHeadings == dot) White else Panel2,
-                            shape = RoundedCornerShape(16.dp)
-                        ) {
-                            Text(
-                                text = (if (useDotHeadings == dot) "✓  " else "") + label,
-                                color = if (useDotHeadings == dot) Bg else White,
-                                fontSize = 13.sp,
-                                modifier = Modifier.padding(vertical = 12.dp, horizontal = 10.dp)
-                            )
+        SectionLabel(npString(R.string.np_b8331e795763), topPadding = 24.dp, bottomPadding = 10.dp)
+        Column(Modifier.fillMaxWidth(), verticalArrangement = Arrangement.spacedBy(10.dp)) {
+            Surface(color = Panel, shape = RoundedCornerShape(22.dp), modifier = Modifier.fillMaxWidth()) {
+                Column(Modifier.padding(16.dp)) {
+                    Text(npString(R.string.np_29db02be308f), fontSize = 16.sp, color = White, fontWeight = FontWeight.Medium)
+                    Spacer(Modifier.height(4.dp))
+                    Text(npString(R.string.np_ed3994287ff4), fontSize = 11.sp, color = Muted, lineHeight = 16.sp)
+                    Spacer(Modifier.height(12.dp))
+                    Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                        listOf(false to npString(R.string.np_2cc58a112d0a), true to npString(R.string.np_db4262bdee36)).forEach { (dot, label) ->
+                            Surface(
+                                modifier = Modifier.weight(1f).clickable { onHeadingStyleChange(dot) },
+                                color = if (useDotHeadings == dot) White else Panel2,
+                                shape = RoundedCornerShape(16.dp)
+                            ) {
+                                Text(
+                                    text = (if (useDotHeadings == dot) "✓  " else "") + label,
+                                    color = if (useDotHeadings == dot) Bg else White,
+                                    fontSize = 13.sp,
+                                    modifier = Modifier.padding(vertical = 12.dp, horizontal = 10.dp)
+                                )
+                            }
                         }
                     }
-                }
-                Spacer(Modifier.height(10.dp))
-                DisplayTitle(npString(R.string.np_42c1112fd679), ndot, fontSize = 25.sp)
-            }
-        }
-        Surface(color = Panel, shape = RoundedCornerShape(22.dp), modifier = Modifier.fillMaxWidth().padding(top = 10.dp)) {
-            Column(Modifier.padding(16.dp)) {
-                Text(npString(R.string.np_27afe8e47ea3), fontSize = 16.sp, color = White, fontWeight = FontWeight.Medium)
-                Text(npString(R.string.np_e35fa12ca640), fontSize = 11.sp, color = Muted)
-                Spacer(Modifier.height(12.dp))
-                Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
-                    ProgressStyleTile(npString(R.string.np_e51bd6be1fe7), !orbit, Modifier.weight(1f), { onProgressStyleChange(false) }) { fg, track -> MiniBars(fg, track) }
-                    ProgressStyleTile(npString(R.string.np_78ba515b2614), orbit, Modifier.weight(1f), { onProgressStyleChange(true) }) { fg, track -> MiniRing(fg, track) }
+                    Spacer(Modifier.height(10.dp))
+                    DisplayTitle(npString(R.string.np_42c1112fd679), ndot, fontSize = 25.sp)
                 }
             }
-        }
-        Surface(color = Panel, shape = RoundedCornerShape(22.dp), modifier = Modifier.fillMaxWidth().padding(top = 10.dp)) {
-            Column(Modifier.padding(16.dp)) {
-                Text(npString(R.string.np_418ebf21947a), fontSize = 16.sp, color = White, fontWeight = FontWeight.Medium)
-                Text(npString(R.string.np_349e9979c0db), fontSize = 11.sp, color = Muted)
-                Spacer(Modifier.height(12.dp))
-                Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
-                    ProgressStyleTile(npString(R.string.np_b6dafaa1c8b5), historyDots, Modifier.weight(1f), { onHistoryStyleChange(true) }) { fg, track -> MiniHistoryDots(fg, track) }
-                    ProgressStyleTile(npString(R.string.np_33fe92f625e5), !historyDots, Modifier.weight(1f), { onHistoryStyleChange(false) }) { fg, track -> MiniHistoryCalendar(fg, track) }
+            NPlannerColorModeSettings()
+            Surface(color = Panel, shape = RoundedCornerShape(22.dp), modifier = Modifier.fillMaxWidth()) {
+                Column(Modifier.padding(16.dp)) {
+                    Text(npString(R.string.np_27afe8e47ea3), fontSize = 16.sp, color = White, fontWeight = FontWeight.Medium)
+                    Spacer(Modifier.height(4.dp))
+                    Text(npString(R.string.np_e35fa12ca640), fontSize = 11.sp, color = Muted, lineHeight = 16.sp)
+                    Spacer(Modifier.height(12.dp))
+                    Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                        ProgressStyleTile(npString(R.string.np_e51bd6be1fe7), !orbit, Modifier.weight(1f), { onProgressStyleChange(false) }) { fg, track -> MiniBars(fg, track) }
+                        ProgressStyleTile(npString(R.string.np_78ba515b2614), orbit, Modifier.weight(1f), { onProgressStyleChange(true) }) { fg, track -> MiniRing(fg, track) }
+                    }
                 }
             }
+            Surface(color = Panel, shape = RoundedCornerShape(22.dp), modifier = Modifier.fillMaxWidth()) {
+                Column(Modifier.padding(16.dp)) {
+                    Text(npString(R.string.np_418ebf21947a), fontSize = 16.sp, color = White, fontWeight = FontWeight.Medium)
+                    Spacer(Modifier.height(4.dp))
+                    Text(npString(R.string.np_349e9979c0db), fontSize = 11.sp, color = Muted, lineHeight = 16.sp)
+                    Spacer(Modifier.height(12.dp))
+                    Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                        ProgressStyleTile(npString(R.string.np_b6dafaa1c8b5), historyDots, Modifier.weight(1f), { onHistoryStyleChange(true) }) { fg, track -> MiniHistoryDots(fg, track) }
+                        ProgressStyleTile(npString(R.string.np_33fe92f625e5), !historyDots, Modifier.weight(1f), { onHistoryStyleChange(false) }) { fg, track -> MiniHistoryCalendar(fg, track) }
+                    }
+                }
+            }
+            NPlannerLanguageSettings()
         }
-
-        Spacer(Modifier.height(16.dp))
-        SectionLabel(if (npLocale().language == "de") "DATENSICHERUNG" else "BACKUP")
+        SectionLabel(if (npLocale().language == "de") "DATENSICHERUNG" else "BACKUP",
+            topPadding = 24.dp, bottomPadding = 10.dp)
         NPlannerDriveBackupSettings()
-        Spacer(Modifier.height(10.dp))
-        SectionLabel(npString(R.string.np_9028b65aa0a5), topPadding = 22.dp, bottomPadding = 10.dp)
+        SectionLabel(npString(R.string.np_9028b65aa0a5), topPadding = 24.dp, bottomPadding = 10.dp)
         Surface(
             color = Panel,
             shape = RoundedCornerShape(22.dp),
@@ -6807,7 +6808,7 @@ private fun SetupScreen(
             }
         }
 
-        HorizontalDivider(color = npNeutral(0xFF242424), modifier = Modifier.padding(top = 6.dp))
+        HorizontalDivider(color = npNeutral(0xFF242424), modifier = Modifier.padding(top = 20.dp))
         Text(
             "${npString(R.string.np_69a89741235d)} $NPLANNER_VERSION",
             color = npNeutral(0xFFB6B6B6),
@@ -6823,7 +6824,7 @@ private fun SetupScreen(
 @Composable
 private fun ChoiceChip(label: String, selected: Boolean, modifier: Modifier = Modifier, onClick: () -> Unit) {
     Surface(
-        modifier = modifier.clickable(onClick = onClick),
+        modifier = modifier.clickable(onClick = if (selected) onClick else npHapticClick(onClick)),
         color = if (selected) White else Panel2,
         shape = RoundedCornerShape(16.dp)
     ) {
@@ -6841,7 +6842,7 @@ private fun ChoiceChip(label: String, selected: Boolean, modifier: Modifier = Mo
 
 @Composable
 private fun TimeBox(label: String, minutes: Int, ndot: FontFamily, modifier: Modifier, onClick: () -> Unit) {
-    Surface(modifier = modifier.clickable(onClick = onClick), color = Panel2, shape = RoundedCornerShape(22.dp)) {
+    Surface(modifier = modifier.clickable(onClick = npHapticClick(onClick)), color = Panel2, shape = RoundedCornerShape(22.dp)) {
         Column(Modifier.padding(horizontal = 19.dp, vertical = 14.dp)) {
             Text(label, color = Muted, fontSize = 10.sp)
             DisplayTitle(fmt(minutes), ndot, Modifier.padding(top = 4.dp), 28.sp)
